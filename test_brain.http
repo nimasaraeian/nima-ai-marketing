@@ -1,0 +1,24 @@
+### NIMA AI Brain Test - Marketing Strategy Query
+POST http://127.0.0.1:8000/api/brain
+Content-Type: application/json
+
+{
+  "role": "ai_marketing_strategist",
+  "locale": "tr-TR",
+  "city": "Istanbul",
+  "industry": "restaurant",
+  "channel": "Instagram Ads",
+  "query": "I own a mid-range restaurant in Kadıköy, Istanbul. Here is my current Instagram ad copy: 'Delicious food, cozy vibes. Visit us tonight!' Our CTR is low and people save the post but don't click. Analyze this ad using behavioral marketing and AI, suggest 3-5 concrete new ad variants, and propose 2 A/B test ideas with clear metrics."
+}
+
+### Health Check
+GET http://127.0.0.1:8000/health
+
+### System Prompt Info
+GET http://127.0.0.1:8000/api/system-prompt/info
+
+### Root
+GET http://127.0.0.1:8000/
+
+
+

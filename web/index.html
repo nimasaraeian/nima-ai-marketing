@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Marketing Operating System | Nima Saraeian</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="/">Nima Saraeian</a>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="/">Home</a></li>
+                <li><a href="/about">About</a></li>
+                <li><a href="/ai-marketing" class="active">AI Marketing</a></li>
+                <li><a href="/contact">Contact</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Hero Section -->
+    <section class="hero">
+        <div class="container">
+            <div class="hero-content">
+                <h1 class="hero-title">
+                    <span class="gradient-text">Behavior × AI × Strategy</span>
+                </h1>
+                <p class="hero-subtitle">AI Marketing Operating System</p>
+                <p class="hero-description">
+                    Not just tools. A complete, behavior-first AI marketing system powered by 
+                    <strong>Selphlyze</strong> (psychometrics) and <strong>Contlyze</strong> 
+                    (behavior & content intelligence).
+                </p>
+                <div class="hero-cta">
+                    <button class="btn btn-primary" onclick="scrollToModules()">Explore Modules</button>
+                    <button class="btn btn-secondary" onclick="openConsultation()">Book a Consultation</button>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Why This Works -->
+    <section class="why-section">
+        <div class="container">
+            <h2 class="section-title">Why this works</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon">🧠</div>
+                    <h3>Behavior-first</h3>
+                    <p>Understands motivations, barriers, emotional triggers — not just clicks.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">⚙️</div>
+                    <h3>Dual Engines</h3>
+                    <p>Selphlyze (psychometric) + Contlyze (market & content) for depth & breadth.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon">🚀</div>
+                    <h3>Operating System</h3>
+                    <p>One system for research, strategy, content, conversion & automation.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- 5 Core Modules -->
+    <section class="modules-section" id="modules">
+        <div class="container">
+            <h2 class="section-title">The 5 Core Modules</h2>
+            
+            <!-- Module 1: DeepScan -->
+            <div class="module-card" data-module="deepscan">
+                <div class="module-header">
+                    <div class="module-icon">🔍</div>
+                    <div>
+                        <h3>Behavioral DeepScan</h3>
+                        <ul class="module-features">
+                            <li>Psychometric mapping (cognition, emotion, decision patterns)</li>
+                            <li>Audience motivations, barriers, triggers</li>
+                            <li>Cultural & aesthetic preferences (Aesthlyzer-ready)</li>
+                        </ul>
+                        <p class="module-powered">Powered by <strong>Selphlyze</strong> — proprietary AI psychometric layer.</p>
+                    </div>
+                </div>
+                <button class="btn btn-module" onclick="openModule('deepscan')">Start DeepScan</button>
+            </div>
+
+            <!-- Module 2: Market Intelligence -->
+            <div class="module-card" data-module="market">
+                <div class="module-header">
+                    <div class="module-icon">📊</div>
+                    <div>
+                        <h3>Market & Trend Intelligence</h3>
+                        <ul class="module-features">
+                            <li>Competitors & category mapping</li>
+                            <li>Audience reaction signals & trend shifts</li>
+                            <li>Content pattern & positioning gaps</li>
+                        </ul>
+                        <p class="module-powered">Powered by <strong>Contlyze</strong> — behavior & content intelligence.</p>
+                    </div>
+                </div>
+                <button class="btn btn-module" onclick="openModule('market')">Analyze Market</button>
+            </div>
+
+            <!-- Module 3: Content Engine -->
+            <div class="module-card" data-module="content">
+                <div class="module-header">
+                    <div class="module-icon">✍️</div>
+                    <div>
+                        <h3>AI Content Engine</h3>
+                        <ul class="module-features">
+                            <li>30-day adaptive calendar + 100 ideas</li>
+                            <li>Voice, tone, hooks and narrative arcs</li>
+                            <li>Format mapping (IG, YT, LinkedIn, blog, email)</li>
+                        </ul>
+                    </div>
+                </div>
+                <button class="btn btn-module" onclick="openModule('content')">Generate Content</button>
+            </div>
+
+            <!-- Module 4: Conversion -->
+            <div class="module-card" data-module="conversion">
+                <div class="module-header">
+                    <div class="module-icon">🎯</div>
+                    <div>
+                        <h3>Conversion & Funnel Architecture</h3>
+                        <ul class="module-features">
+                            <li>Decision journey & trust points</li>
+                            <li>Layered funnels with behavioral cues</li>
+                            <li>Retention boosters & relationship triggers</li>
+                        </ul>
+                    </div>
+                </div>
+                <button class="btn btn-module" onclick="openModule('conversion')">Design Funnel</button>
+            </div>
+
+            <!-- Module 5: Automation -->
+            <div class="module-card" data-module="automation">
+                <div class="module-header">
+                    <div class="module-icon">🤖</div>
+                    <div>
+                        <h3>AI Automation System</h3>
+                        <ul class="module-features">
+                            <li>Lead qualification & routing</li>
+                            <li>DM/WhatsApp/Email automation</li>
+                            <li>Appointment & follow-up with behavior triggers</li>
+                        </ul>
+                    </div>
+                </div>
+                <button class="btn btn-module" onclick="openModule('automation')">Setup Automation</button>
+            </div>
+        </div>
+    </section>
+
+    <!-- Module Modal -->
+    <div id="moduleModal" class="modal">
+        <div class="modal-content">
+            <span class="close" onclick="closeModule()">&times;</span>
+            <div id="moduleFormContainer"></div>
+        </div>
+    </div>
+
+    <!-- Results Modal -->
+    <div id="resultsModal" class="modal">
+        <div class="modal-content modal-large">
+            <span class="close" onclick="closeResults()">&times;</span>
+            <div id="resultsContainer"></div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="loading-overlay">
+        <div class="loading-spinner"></div>
+        <p>AI is analyzing your request...</p>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+
+
+
