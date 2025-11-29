@@ -1,6 +1,13 @@
-openai>=1.0.0
-python-dotenv>=1.0.0
+# Core FastAPI dependencies
 fastapi>=0.104.0
-uvicorn>=0.24.0
+uvicorn[standard]>=0.24.0
 pydantic>=2.0.0
 
+# Environment and configuration
+python-dotenv>=1.0.0
+
+# OpenAI API client
+openai>=1.0.0
+
+# HTTP requests (for testing and external APIs)
+requests>=2.31.0

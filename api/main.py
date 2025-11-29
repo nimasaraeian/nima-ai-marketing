@@ -1,5 +1,11 @@
 """
 FastAPI application with AI brain system prompt - Main entry point
+
+Deployment:
+  For Render or similar services, use:
+  uvicorn api.main:app --host 0.0.0.0 --port $PORT
+  
+  Module path: api.main:app
 """
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -37,17 +43,20 @@ else:
 app = FastAPI(title="Nima AI Brain API", version="1.0.0")
 
 # Add CORS middleware
-# DEV: allow specific origins for development
+# Production: allow frontend domains
+# Development: allow localhost for local testing
 origins = [
-    "http://localhost:3000",
-    "http://127.0.0.1:3000",
-    "http://localhost:8000",
-    "http://127.0.0.1:8000",
+    "https://nimasaraeian.com",
+    "https://www.nimasaraeian.com",
+    "http://localhost:3000",  # DEV: local development
+    "http://127.0.0.1:3000",  # DEV: local development
+    "http://localhost:8000",  # DEV: local development
+    "http://127.0.0.1:8000",  # DEV: local development
 ]
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  # DEV: این‌ها رو اجازه بده
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -204,8 +213,8 @@ def chat(request: ChatRequest):
 
 @app.get("/health")
 def health():
-    """Health check endpoint"""
-    return {"status": "healthy"}
+    """Health check endpoint for deployment monitoring"""
+    return {"status": "ok"}
 
 
 @app.get("/api/system-prompt/info")
