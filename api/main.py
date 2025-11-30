@@ -27,6 +27,11 @@ from cognitive_friction_engine import (
     CognitiveFrictionInput,
     CognitiveFrictionResult
 )
+from psychology_engine import (
+    analyze_psychology,
+    PsychologyAnalysisInput,
+    PsychologyAnalysisResult
+)
 from rewrite_engine import rewrite_text
 from models.rewrite_models import RewriteInput, RewriteOutput
 
@@ -291,6 +296,52 @@ async def rewrite_endpoint(input: RewriteInput):
     and returns 5 rewritten versions + a CTA suggestion.
     """
     return await rewrite_text(input)
+
+
+@app.post("/api/brain/psychology-analysis", response_model=PsychologyAnalysisResult)
+async def psychology_analysis_endpoint(input_data: PsychologyAnalysisInput):
+    """
+    CORE PSYCHOLOGY ENGINE - 13-Pillar Analysis Endpoint
+    
+    Analyzes any text using 13 fundamental psychological pillars:
+    
+    1. Cognitive Friction - Mental effort required to process
+    2. Emotional Resonance - Emotional alignment with user's feeling state
+    3. Trust & Clarity - Trustworthiness and transparency
+    4. Decision Simplicity - Ease of choosing next step
+    5. Motivation Profile - Alignment with SDT (Autonomy, Competence, Relatedness)
+    6. Behavioral Biases - Cognitive bias detection and usage
+    7. Personality Fit - Alignment with personality-driven preferences
+    8. Value Perception - Value communication (functional, emotional, symbolic, etc.)
+    9. Attention Architecture - Structure for capturing and holding attention
+    10. Narrative Clarity - Story flow and structure
+    11. Emotional Safety - Psychological safety and comfort
+    12. Actionability - Ability to generate immediate action
+    13. Identity Alignment - Fit with user's self-identity
+    
+    Returns:
+    - Structured JSON with all 13 pillar analyses (scores, signals, issues, rewrites)
+    - Human-readable psychology report
+    - Overall summary with global score, top problems, top strengths, recommendations
+    
+    This endpoint NEVER skips any pillar and always provides:
+    - Scores (0-100) for each pillar
+    - Explanations and justifications
+    - Improved rewrites for each pillar
+    - Actionable recommendations
+    
+    Location: api/main.py (endpoint definition)
+    Engine: api/psychology_engine.py (analysis logic)
+    System Prompt: Defined in psychology_engine.py
+    """
+    try:
+        result = analyze_psychology(input_data)
+        return result
+    except Exception as e:
+        print(f"\n❌ ERROR in psychology_analysis_endpoint: {type(e).__name__}: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 
