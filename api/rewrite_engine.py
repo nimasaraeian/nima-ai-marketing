@@ -221,7 +221,8 @@ async def rewrite_text(input: RewriteInput) -> dict:
         
         # Parse JSON safely
         try:
-            data = json.loads(raw_content)
+            from json_utils import safe_parse_json
+            data = safe_parse_json(raw_content, context="rewrite analysis")
             
             # Ensure all required fields exist with defaults
             required_fields = {
@@ -239,9 +240,10 @@ async def rewrite_text(input: RewriteInput) -> dict:
             
             return data
             
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, ValueError) as e:
             # Fallback: return original text in all versions
-            print(f"⚠️ JSON parsing error. Raw response: {raw_content[:200]}")
+            print(f"⚠️ JSON parsing error in rewrite analysis: {str(e)}")
+            print(f"⚠️ Raw response preview: {raw_content[:500]}")
             return {
                 "soft_version": input.text,
                 "value_version": input.text,

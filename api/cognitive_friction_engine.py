@@ -407,7 +407,8 @@ def analyze_cognitive_friction(input_data: CognitiveFrictionInput) -> CognitiveF
         
         # Parse JSON safely
         try:
-            data = json.loads(raw_content)
+            from json_utils import safe_parse_json
+            data = safe_parse_json(raw_content, context="cognitive friction analysis")
             
             # Ensure decisionProbability is 0-1 (convert if 0-100)
             if "decisionProbability" in data:
@@ -439,9 +440,10 @@ def analyze_cognitive_friction(input_data: CognitiveFrictionInput) -> CognitiveF
             
             return CognitiveFrictionResult(**data)
             
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, ValueError) as e:
             # Fallback: return a low-confidence default structure
-            print(f"⚠️ JSON parsing error. Raw response: {raw_content[:200]}")
+            print(f"⚠️ JSON parsing error in cognitive friction analysis: {str(e)}")
+            print(f"⚠️ Raw response preview: {raw_content[:500]}")
             return CognitiveFrictionResult(
                 frictionScore=50.0,
                 trustScore=50.0,

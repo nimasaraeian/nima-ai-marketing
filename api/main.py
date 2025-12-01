@@ -210,7 +210,14 @@ async def brain_endpoint(
         print(f"\n❌ ERROR in brain_endpoint: {type(e).__name__}: {e}")
         import traceback
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return error in BrainResponse format to maintain API contract
+        error_message = str(e) if str(e) else "Internal error while analyzing content."
+        return BrainResponse(
+            response=f"Error: {error_message}. Please try again later or contact support if the issue persists.",
+            model="gpt-4o-mini",
+            quality_score=0,
+            quality_checks={"error": True, "error_type": type(e).__name__}
+        )
 
 
 @app.post("/chat", response_model=ChatResponse)

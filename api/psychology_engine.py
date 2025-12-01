@@ -4512,9 +4512,10 @@ VIOLATION OF REWRITE SAFETY RULES IS UNACCEPTABLE."""
         
         raw_content = response.choices[0].message.content
         
-        # Parse JSON response
+        # Parse JSON response safely
         try:
-            data = json.loads(raw_content)
+            from json_utils import safe_parse_json
+            data = safe_parse_json(raw_content, context="psychology analysis")
             
             # Validate structure
             if "overall" not in data:
@@ -4625,8 +4626,9 @@ VIOLATION OF REWRITE SAFETY RULES IS UNACCEPTABLE."""
             
             return PsychologyAnalysisResult(**data)
             
-        except json.JSONDecodeError as e:
-            print(f"⚠️ JSON parsing error. Raw response: {raw_content[:500]}")
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"⚠️ JSON parsing error in psychology analysis: {str(e)}")
+            print(f"⚠️ Raw response preview: {raw_content[:500]}")
             # Return fallback structure
             return _create_fallback_result(input_data, f"JSON parsing error: {str(e)}")
     
