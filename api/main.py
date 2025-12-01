@@ -7,13 +7,14 @@ Deployment:
   
   Module path: api.main:app
 """
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 import os
 import sys
 import base64
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -127,13 +128,15 @@ def root():
 
 
 @app.post("/api/brain", response_model=BrainResponse)
-async def brain_endpoint(
-    content: Optional[str] = Form(None, description="Text content to analyze (optional if image provided)"),
-    image: Optional[UploadFile] = File(None, description="Optional image file")
-):
+async def brain_endpoint(request: Request):
     """
     Brain endpoint for marketing strategy queries.
-    Accepts multipart/form-data with:
+    Accepts both JSON and multipart/form-data:
+    
+    JSON format:
+    - {"query": "text", "role": "...", "city": "...", "industry": "...", "channel": "..."}
+    
+    Multipart format:
     - content (optional): Text content to analyze
     - image (optional): Image file for visual analysis
     
@@ -145,29 +148,74 @@ async def brain_endpoint(
         # Log request info
         print("\n" + "=" * 60)
         print("=== NIMA BRAIN REQUEST ===")
-        print(f"[/api/brain] has image? {image is not None}")
+        content_type = request.headers.get("content-type", "")
+        print(f"[/api/brain] Content-Type: {content_type}")
         
-        # Process content
-        content_processed = content.strip() if content else ""
-        print(f"[/api/brain] content length: {len(content_processed)}")
+        # Determine if request is JSON or multipart
+        content_processed = ""
+        image_base64: Optional[str] = None
+        image_mime: Optional[str] = None
+        
+        if "application/json" in content_type:
+            # Handle JSON request (from frontend)
+            body = await request.json()
+            print(f"[/api/brain] JSON request received")
+            
+            # Extract query from JSON body
+            query = body.get("query", "")
+            # Combine all fields into a comprehensive query if needed
+            if query:
+                content_processed = query
+            else:
+                # Build query from individual fields
+                role = body.get("role", "")
+                city = body.get("city", "")
+                industry = body.get("industry", "")
+                channel = body.get("channel", "")
+                query_text = body.get("query", "")
+                
+                if query_text:
+                    content_processed = query_text
+                elif role or city or industry:
+                    content_processed = f"{role} analysis for {industry} in {city}"
+            
+            print(f"[/api/brain] content length: {len(content_processed)}")
+            print(f"[/api/brain] has image? False (JSON request)")
+            
+        else:
+            # Handle multipart/form-data request (with image support)
+            form_data = await request.form()
+            content = form_data.get("content")
+            image = form_data.get("image")
+            
+            if content:
+                content_processed = content.strip() if isinstance(content, str) else str(content)
+            else:
+                content_processed = ""
+            
+            print(f"[/api/brain] content length: {len(content_processed)}")
+            
+            # Handle image if provided
+            if image:
+                # image could be UploadFile or a form field
+                if hasattr(image, 'read'):
+                    # It's an UploadFile
+                    image_file: UploadFile = image
+                    image_bytes = await image_file.read()
+                    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+                    image_mime = image_file.content_type or "image/png"
+                    print(f"[/api/brain] Image received: {image_file.filename}, type: {image_mime}, size: {len(image_bytes)} bytes")
+                else:
+                    print(f"[/api/brain] Image field exists but is not a file")
+            else:
+                print(f"[/api/brain] has image? False")
         
         # تنها حالت غیرمجاز: نه متن، نه تصویر
-        if not content_processed and not image:
+        if not content_processed and not image_base64:
             raise HTTPException(
                 status_code=400,
                 detail="No content or image provided. Please upload a screenshot or paste the landing page/ad copy text."
             )
-        
-        # آماده‌سازی تصویر (در صورت وجود)
-        image_base64: Optional[str] = None
-        image_mime: Optional[str] = None
-        
-        if image:
-            # Read image file and convert to base64
-            image_bytes = await image.read()
-            image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-            image_mime = image.content_type or "image/png"
-            print(f"[/api/brain] Image received: {image.filename}, type: {image_mime}, size: {len(image_bytes)} bytes")
         
         print("\n=== SYSTEM PROMPT USED ===")
         print(SYSTEM_PROMPT[:500])
