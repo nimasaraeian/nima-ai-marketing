@@ -1,0 +1,140 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "definitions": {
+    "PsychologyAnalysisResult": {
+      "type": "object",
+      "properties": {
+        "analysis": {
+          "type": "object",
+          "properties": {
+            "cognitive_friction": {
+              "type": "object",
+              "properties": {
+                "score": {"type": "number", "minimum": 0, "maximum": 100},
+                "signals": {"type": "array", "items": {"type": "string"}},
+                "hotspots": {"type": "array", "items": {"type": "string"}},
+                "reasons": {"type": "string"},
+                "rewrite": {"type": "string"},
+                "issues": {"type": "array", "items": {"type": "string"}},
+                "reasons": {"type": "string"}
+              },
+              "required": ["score", "rewrite"]
+            },
+            "emotional_resonance": {
+              "type": "object",
+              "properties": {
+                "score": {"type": "number", "minimum": 0, "maximum": 100},
+                "emotion_detected": {"type": "string"},
+                "emotion_required": {"type": "string"},
+                "mismatch": {"type": "string"},
+                "resistance_factors": {"type": "array", "items": {"type": "string"}},
+                "emotionalResistanceFactors": {"type": "array", "items": {"type": "string"}},
+                "rewrite": {"type": "string"}
+              },
+              "required": ["score", "rewrite"]
+            },
+            "trust_clarity": {
+              "type": "object",
+              "properties": {
+                "score": {"type": "number", "minimum": 0, "maximum": 100},
+                "trust_score": {"type": "number", "minimum": 0, "maximum": 100},
+                "issues": {"type": "array", "items": {"type": "string"}},
+                "breakpoints": {"type": "array", "items": {"type": "string"}},
+                "trustBreakpoints": {"type": "array", "items": {"type": "string"}},
+                "rewrite": {"type": "string"}
+              },
+              "required": ["score"]
+            },
+            "motivation_profile": {
+              "type": "object",
+              "properties": {
+                "score": {"type": "number", "minimum": 0, "maximum": 100},
+                "dominant": {"type": "string"},
+                "misalignment_signals": {"type": "array", "items": {"type": "string"}},
+                "rewrite": {"type": "string"}
+              },
+              "required": ["score", "rewrite"]
+            }
+          }
+        },
+        "overall": {
+          "type": "object",
+          "properties": {
+            "global_score": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+            "interpretation": {"type": "string"},
+            "decision_likelihood_percentage": {"type": ["number", "null"], "minimum": 0, "maximum": 100},
+            "decision_likelihood": {"type": ["number", "null"]},
+            "conversion_lift_estimate": {"type": ["number", "null"], "minimum": -100, "maximum": 100},
+            "conversionLiftEstimate": {"type": ["number", "null"]},
+            "priority_fixes": {
+              "type": "array",
+              "items": {
+                "oneOf": [
+                  {"type": "string"},
+                  {
+                    "type": "object",
+                    "properties": {
+                      "issue": {"type": "string"},
+                      "explanation": {"type": "string"},
+                      "solution": {"type": "string"}
+                    }
+                  }
+                ]
+              }
+            },
+            "recommendedQuickWins": {"type": "array", "items": {"type": "string"}},
+            "quick_wins": {"type": "array", "items": {"type": "string"}},
+            "recommendedDeepChanges": {"type": "array", "items": {"type": "string"}},
+            "final_recommendations": {"type": "array", "items": {"type": "string"}},
+            "strengths": {"type": "array", "items": {"type": "string"}},
+            "summary": {"type": "string"},
+            "explanationSummary": {"type": "string"}
+          }
+        },
+        "human_readable_report": {"type": "string"},
+        "visual_trust": {
+          "type": "object",
+          "properties": {
+            "label": {"type": "string"},
+            "score_numeric": {"type": ["number", "null"]},
+            "scores": {"type": "object"},
+            "error": {"type": "string"},
+            "model_missing": {"type": "boolean"}
+          }
+        },
+        "visual_layer": {
+          "type": "object",
+          "properties": {
+            "visual_trust_label": {"type": "string"},
+            "visual_trust_score": {"type": ["number", "null"]},
+            "visual_trust_breakdown": {"type": "object"},
+            "visual_trust_scores": {"type": "object"},
+            "visual_comment": {"type": "string"}
+          }
+        }
+      },
+      "required": ["analysis", "overall"]
+    },
+    "CognitiveFrictionResult": {
+      "type": "object",
+      "properties": {
+        "frictionScore": {"type": "number", "minimum": 0, "maximum": 100},
+        "trustScore": {"type": "number", "minimum": 0, "maximum": 100},
+        "emotionalClarityScore": {"type": "number", "minimum": 0, "maximum": 100},
+        "motivationMatchScore": {"type": "number", "minimum": 0, "maximum": 100},
+        "decisionProbability": {"type": "number", "minimum": 0, "maximum": 1},
+        "conversionLiftEstimate": {"type": "number", "minimum": -100, "maximum": 100},
+        "keyDecisionBlockers": {"type": "array", "items": {"type": "string"}},
+        "emotionalResistanceFactors": {"type": "array", "items": {"type": "string"}},
+        "cognitiveOverloadFactors": {"type": "array", "items": {"type": "string"}},
+        "trustBreakpoints": {"type": "array", "items": {"type": "string"}},
+        "motivationMisalignments": {"type": "array", "items": {"type": "string"}},
+        "recommendedQuickWins": {"type": "array", "items": {"type": "string"}},
+        "recommendedDeepChanges": {"type": "array", "items": {"type": "string"}},
+        "explanationSummary": {"type": "string"}
+      },
+      "required": ["frictionScore", "trustScore", "emotionalClarityScore", "motivationMatchScore", "decisionProbability", "conversionLiftEstimate", "explanationSummary"]
+    }
+  }
+}
+
