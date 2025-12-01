@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 import os
 import sys
+import base64
 from pathlib import Path
 from typing import Optional
 
@@ -22,7 +23,7 @@ if str(api_dir) not in sys.path:
     sys.path.insert(0, str(api_dir))
 
 from brain_loader import load_brain_memory
-from chat import chat_completion
+from chat import chat_completion, chat_completion_with_image
 from cognitive_friction_engine import (
     analyze_cognitive_friction,
     CognitiveFrictionInput,
@@ -126,34 +127,47 @@ def root():
 
 
 @app.post("/api/brain", response_model=BrainResponse)
-def brain_endpoint(request: BrainRequest):
+async def brain_endpoint(
+    content: Optional[str] = Form(None, description="Text content to analyze (optional if image provided)"),
+    image: Optional[UploadFile] = File(None, description="Optional image file")
+):
     """
     Brain endpoint for marketing strategy queries.
-    Accepts structured requests with role, locale, city, industry, channel, and query.
+    Accepts multipart/form-data with:
+    - content (optional): Text content to analyze
+    - image (optional): Image file for visual analysis
+    
+    At least one of content or image must be provided.
     """
+    MIN_TEXT_LENGTH = 0  # عملاً بی‌اثر، فقط می‌گذاریم اگر بعداً خواستی هشدار بدهی
+    
     try:
-        # Build the full query with context
-        full_query = f"""Context:
-- Role: {request.role}
-- Locale: {request.locale}
-- City: {request.city}
-- Industry: {request.industry}
-- Channel: {request.channel}
-
-Query: {request.query}"""
-
-        # Logging
+        # Log request info
         print("\n" + "=" * 60)
-        print("=== NIMA TEST REQUEST ===")
-        request_data = {
-            "role": request.role,
-            "locale": request.locale,
-            "city": request.city,
-            "industry": request.industry,
-            "channel": request.channel,
-            "query": request.query
-        }
-        print(request_data)
+        print("=== NIMA BRAIN REQUEST ===")
+        print(f"[/api/brain] has image? {image is not None}")
+        
+        # Process content
+        content_processed = content.strip() if content else ""
+        print(f"[/api/brain] content length: {len(content_processed)}")
+        
+        # تنها حالت غیرمجاز: نه متن، نه تصویر
+        if not content_processed and not image:
+            raise HTTPException(
+                status_code=400,
+                detail="No content or image provided. Please upload a screenshot or paste the landing page/ad copy text."
+            )
+        
+        # آماده‌سازی تصویر (در صورت وجود)
+        image_base64: Optional[str] = None
+        image_mime: Optional[str] = None
+        
+        if image:
+            # Read image file and convert to base64
+            image_bytes = await image.read()
+            image_base64 = base64.b64encode(image_bytes).decode('utf-8')
+            image_mime = image.content_type or "image/png"
+            print(f"[/api/brain] Image received: {image.filename}, type: {image_mime}, size: {len(image_bytes)} bytes")
         
         print("\n=== SYSTEM PROMPT USED ===")
         print(SYSTEM_PROMPT[:500])
@@ -164,20 +178,22 @@ Query: {request.query}"""
         print(f"Quality Engine Active: {QUALITY_ENGINE_ENABLED}")
         print("=" * 60 + "\n")
 
-        # Get response
-        response_text = chat_completion(
-            user_message=full_query,
+        # Get response (supports text-only, image-only, or both)
+        response_text = chat_completion_with_image(
+            user_message=content_processed,  # ممکن است خالی باشد
+            image_base64=image_base64,
+            image_mime=image_mime,
             model="gpt-4o-mini",
             temperature=0.7
         )
 
-        # Quality checks
+        # Quality checks (simplified since we don't have city/industry context anymore)
         quality_checks = {
             "has_examples": any(keyword in response_text.lower() for keyword in ["headline", "hook", "مثال", "example", '"', '«']),
-            "has_localization": any(keyword in response_text.lower() for keyword in [request.city.lower(), "istanbul", "استانبول", "tourist", "local", "گردشگر", "محلی"]),
             "has_action_plan": any(keyword in response_text.lower() for keyword in ["0-7", "7-30", "action", "برنامه", "اقدام"]),
             "has_metrics": any(keyword in response_text for keyword in ["%", "درصد", "ctr", "cpc", "cvr"]),
-            "has_analysis": any(keyword in response_text.lower() for keyword in ["علت", "cause", "مشکل", "problem", "ریشه"])
+            "has_analysis": any(keyword in response_text.lower() for keyword in ["علت", "cause", "مشکل", "problem", "ریشه"]),
+            "has_image_analysis": image_base64 is not None  # Track if image was analyzed
         }
         
         quality_score = sum(quality_checks.values())
@@ -188,6 +204,8 @@ Query: {request.query}"""
             quality_score=quality_score,
             quality_checks=quality_checks
         )
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"\n❌ ERROR in brain_endpoint: {type(e).__name__}: {e}")
         import traceback

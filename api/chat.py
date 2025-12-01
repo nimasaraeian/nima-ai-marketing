@@ -81,6 +81,57 @@ def chat_completion(user_message, model="gpt-4", temperature=0.7):
     return response.choices[0].message.content
 
 
+def chat_completion_with_image(user_message="", image_base64=None, image_mime=None, model="gpt-4o-mini", temperature=0.7):
+    """
+    Send a chat message with optional image using the AI brain system prompt.
+    Supports text-only, image-only, or both.
+    
+    Args:
+        user_message: The user's text message (can be empty if image is provided)
+        image_base64: Optional base64-encoded image string
+        image_mime: Optional MIME type of the image (e.g., "image/png", "image/jpeg")
+        model: OpenAI model to use (default: gpt-4o-mini)
+        temperature: Temperature for response (default: 0.7)
+    
+    Returns:
+        str: Assistant's response
+    """
+    client = get_client()
+    
+    # Build user content array conditionally
+    user_content = []
+    
+    # Add text only if content exists
+    if user_message and user_message.strip():
+        user_content.append({"type": "text", "text": user_message.strip()})
+    
+    # Add image if provided
+    if image_base64 and image_mime:
+        user_content.append({
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:{image_mime};base64,{image_base64}"
+            }
+        })
+    
+    # Fallback: if both are empty, use a default message
+    if not user_content:
+        user_content = [{"type": "text", "text": "Analyze this content."}]
+    
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": user_content}
+    ]
+    
+    response = client.chat.completions.create(
+        model=model,
+        messages=messages,
+        temperature=temperature
+    )
+    
+    return response.choices[0].message.content
+
+
 # Example usage (for testing)
 if __name__ == "__main__":
     test_message = "What's my core expertise in AI marketing?"
