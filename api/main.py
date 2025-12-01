@@ -180,6 +180,7 @@ async def brain_endpoint(
 
         # Get response (supports text-only, image-only, or both)
         try:
+            print(f"[/api/brain] Calling OpenAI API...")
             response_text = chat_completion_with_image(
                 user_message=content_processed,  # ممکن است خالی باشد
                 image_base64=image_base64,
@@ -187,9 +188,14 @@ async def brain_endpoint(
                 model="gpt-4o-mini",
                 temperature=0.7
             )
+            print(f"[/api/brain] Received response, length: {len(response_text) if response_text else 0}")
+            if response_text:
+                print(f"[/api/brain] Response preview: {response_text[:200]}...")
         except Exception as api_error:
             # Catch API errors separately to provide better error messages
             print(f"⚠️ OpenAI API error: {type(api_error).__name__}: {api_error}")
+            import traceback
+            traceback.print_exc()
             error_msg = "Failed to get response from AI model. Please try again."
             return BrainResponse(
                 response=f"Error: {error_msg}",
@@ -226,8 +232,9 @@ async def brain_endpoint(
         error_message = str(e) if str(e) else "Internal error while analyzing content."
         
         # Check if this is a JSON parsing error and provide a user-friendly message
-        if "JSON" in error_message or "json" in error_message.lower() or "No number after minus sign" in error_message:
-            error_message = "Model response format error. The AI returned an unexpected format. Please try again."
+        if "JSON" in error_message or "json" in error_message.lower() or "No number after minus sign" in error_message or "minus sign" in error_message.lower():
+            print(f"⚠️ Detected JSON parsing error pattern: {error_message[:100]}")
+            error_message = "Model response format error. The AI returned an unexpected format (possibly markdown or bullet points instead of JSON). Please try again."
         
         return BrainResponse(
             response=f"Error: {error_message}. Please try again later or contact support if the issue persists.",
@@ -427,9 +434,19 @@ async def psychology_analysis_with_image(
     except Exception as e:
         import traceback
 
-        print(f"\n❌ ERROR in psychology_analysis_with_image (text analysis): {type(e).__name__}: {e}")
+        error_msg = str(e)
+        print(f"\n❌ ERROR in psychology_analysis_with_image (text analysis): {type(e).__name__}: {error_msg}")
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=f"Text analysis failed: {e}")
+        
+        # Check if this is a JSON parsing error
+        if "JSON" in error_msg or "json" in error_msg.lower() or "No number after minus sign" in error_msg or "minus sign" in error_msg.lower():
+            print(f"⚠️ Detected JSON parsing error in psychology analysis: {error_msg[:100]}")
+            raise HTTPException(
+                status_code=500, 
+                detail="Text analysis failed: Model returned an unexpected format. Please try again."
+            )
+        
+        raise HTTPException(status_code=500, detail=f"Text analysis failed: {error_msg}")
 
     response_payload = base_result.dict()
 

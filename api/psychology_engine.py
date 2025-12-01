@@ -4627,10 +4627,16 @@ VIOLATION OF REWRITE SAFETY RULES IS UNACCEPTABLE."""
             return PsychologyAnalysisResult(**data)
             
         except (json.JSONDecodeError, ValueError) as e:
-            print(f"⚠️ JSON parsing error in psychology analysis: {str(e)}")
+            error_msg = str(e)
+            print(f"⚠️ JSON parsing error in psychology analysis: {error_msg}")
             print(f"⚠️ Raw response preview: {raw_content[:500]}")
-            # Return fallback structure
-            return _create_fallback_result(input_data, f"JSON parsing error: {str(e)}")
+            # Check if this is the specific "No number after minus sign" error
+            if "No number after minus sign" in error_msg or raw_content.strip().startswith("-"):
+                print(f"⚠️ Model returned markdown/bullet points instead of JSON!")
+                print(f"⚠️ First 200 chars: {repr(raw_content[:200])}")
+            # Return fallback structure with user-friendly message
+            user_friendly_msg = "Model returned an unexpected format. Please try again."
+            return _create_fallback_result(input_data, user_friendly_msg)
     
     except Exception as e:
         print(f"❌ Error in analyze_psychology: {type(e).__name__}: {e}")
