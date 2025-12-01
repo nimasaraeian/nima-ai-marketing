@@ -65,3 +65,65 @@ curl -X POST "http://localhost:8000/chat" \
 
 Or use the interactive docs at: http://localhost:8000/docs
 
+## Visual Trust Model Integration (Optional)
+
+You can optionally enable a **visual trust layer** that scores ad / landing page images as:
+`high_trust`, `medium_trust`, or `low_trust` and feeds this into the Decision Psychology report.
+
+### 1. Train the visual trust model
+
+1. Prepare your dataset:
+
+   ```text
+   dataset/
+     images/
+       high_trust/
+       medium_trust/
+       low_trust/
+   ```
+
+2. Train the model (from project root):
+
+   ```bash
+   python training/train_visual_trust_model.py
+   ```
+
+   This will save:
+
+   - `models/visual_trust_model.keras`
+   - `models/visual_trust_class_names.txt`
+
+### 2. Use the text + image endpoint
+
+Once the model is trained and the FastAPI server is running, you can call:
+
+- `POST /api/brain/analyze-with-image`
+- (alias) `POST /api/brain/psychology-analysis-with-image`
+
+Both endpoints accept `multipart/form-data` with fields:
+
+- `text` (string, required): ad or landing page copy
+- `image` (file, optional): screenshot or creative for visual trust analysis
+
+Example `curl` request:
+
+```bash
+curl -X POST "http://localhost:8000/api/brain/analyze-with-image" \
+  -H "Accept: application/json" \
+  -F "text=This is my ad copy for a new landing page..." \
+  -F "image=@/path/to/landing_screenshot.png"
+```
+
+The response extends the standard psychology analysis with:
+
+- `visual_trust`: a compact summary
+  - `label`: `"high_trust" | "medium_trust" | "low_trust"`
+  - `score_numeric`: simple numeric score (e.g. 80/50/20)
+  - `scores`: per-class probabilities
+
+- `visual_layer`: a structured section for the Decision Psychology Report
+  - `visual_trust_label`
+  - `visual_trust_score`
+  - `visual_trust_breakdown`
+  - `visual_comment` (short, rule-based interpretation)
+

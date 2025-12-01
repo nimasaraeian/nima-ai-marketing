@@ -7,13 +7,14 @@ Deployment:
   
   Module path: api.main:app
 """
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
 import os
 import sys
 from pathlib import Path
+from typing import Optional
 
 # Add api directory to path for imports
 api_dir = Path(__file__).parent
@@ -34,6 +35,9 @@ from psychology_engine import (
 )
 from rewrite_engine import rewrite_text
 from models.rewrite_models import RewriteInput, RewriteOutput
+from dataset_upload import router as dataset_router
+from visual_trust_engine import analyze_visual_trust_from_path
+from api.routes.image_trust import router as image_trust_router
 
 # Load environment variables
 # Try loading from project root .env file
@@ -66,6 +70,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register routers
+app.include_router(dataset_router)
+app.include_router(image_trust_router)
 
 # Load system prompt at startup
 SYSTEM_PROMPT = load_brain_memory()
@@ -342,6 +350,123 @@ async def psychology_analysis_endpoint(input_data: PsychologyAnalysisInput):
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/brain/psychology-analysis-with-image")
+async def psychology_analysis_with_image(
+    text: str = Form(..., description="Ad or landing page text to analyze"),
+    image: Optional[UploadFile] = File(
+        default=None, description="Optional image file for visual trust analysis"
+    ),
+):
+    """
+    Extended psychology analysis endpoint that also accepts an optional image.
+
+    Flow:
+    1) Run the existing 13-pillar psychology analysis on the provided text.
+    2) If an image is provided, run visual trust analysis using the trained model.
+    3) Merge visual trust insights into the final JSON response under:
+
+        - visual_trust
+        - visual_layer
+    """
+    # Step 1: Run text-only psychology analysis using existing engine
+    input_data = PsychologyAnalysisInput(
+        raw_text=text,
+        platform="visual_ad_or_landing",
+        goal=["conversion"],
+        audience="general",
+        language="auto",
+        meta={},
+    )
+
+    try:
+        base_result = analyze_psychology(input_data)
+    except Exception as e:
+        import traceback
+
+        print(f"\n❌ ERROR in psychology_analysis_with_image (text analysis): {type(e).__name__}: {e}")
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"Text analysis failed: {e}")
+
+    response_payload = base_result.dict()
+
+    # Step 2: If image is provided, run visual trust analysis
+    visual_trust = None
+    visual_layer = None
+
+    if image is not None:
+        from uuid import uuid4
+
+        project_root = Path(__file__).parent.parent
+        tmp_dir = project_root / "dataset" / "tmp_images"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        ext = Path(image.filename or "").suffix or ".jpg"
+        tmp_path = tmp_dir / f"psychology_visual_{uuid4().hex}{ext}"
+
+        try:
+            # Save uploaded image to a temporary file
+            with tmp_path.open("wb") as buffer:
+                content = await image.read()
+                buffer.write(content)
+
+            vt = analyze_visual_trust_from_path(str(tmp_path))
+
+            visual_trust = {
+                "label": vt.get("trust_label"),
+                "score_numeric": vt.get("trust_score_numeric"),
+                "scores": vt.get("trust_scores", {}),
+            }
+
+            visual_layer = {
+                "visual_trust_label": vt.get("trust_label"),
+                "visual_trust_score": vt.get("trust_score_numeric"),
+                "visual_trust_breakdown": vt.get("trust_scores", {}),
+                "visual_trust_scores": vt.get("trust_scores", {}),
+                "visual_comment": vt.get("visual_comment", ""),
+            }
+        except FileNotFoundError as e:
+            # Model not trained or file issue: surface as 400 so user can fix setup
+            raise HTTPException(status_code=400, detail=str(e))
+        except Exception as e:
+            import traceback
+
+            print(f"\n❌ ERROR in psychology_analysis_with_image (visual analysis): {type(e).__name__}: {e}")
+            traceback.print_exc()
+            # We don't want to lose the text analysis result if visual fails
+            visual_trust = {"error": str(e)}
+            visual_layer = None
+        finally:
+            # Clean up temporary file
+            try:
+                if tmp_path.exists():
+                    tmp_path.unlink()
+            except Exception:
+                # Non-fatal if cleanup fails
+                pass
+
+    # Step 3: Merge visual trust into final response
+    if visual_trust is not None:
+        response_payload["visual_trust"] = visual_trust
+    if visual_layer is not None:
+        response_payload["visual_layer"] = visual_layer
+
+    return response_payload
+
+
+@app.post("/api/brain/analyze-with-image")
+async def analyze_with_image(
+    text: str = Form(..., description="Ad or landing page text to analyze"),
+    image: Optional[UploadFile] = File(
+        default=None, description="Optional image file for visual trust analysis"
+    ),
+):
+    """
+    Convenience alias for /api/brain/psychology-analysis-with-image.
+    Keeps the text-only endpoint intact while adding text+image support.
+    """
+    return await psychology_analysis_with_image(text=text, image=image)
 
 
 

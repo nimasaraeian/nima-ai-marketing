@@ -217,6 +217,96 @@ function showResults(result, moduleTitle) {
     modal.style.display = 'block';
 }
 
+// Visual Psychology + Image (Pro) submission
+async function submitVisualPsychologyWithImage(event) {
+    event.preventDefault();
+
+    const form = event.target;
+    const textEl = document.getElementById('visualProText');
+    const imageEl = document.getElementById('visualProImage');
+
+    if (!textEl || !textEl.value.trim()) {
+        alert('لطفاً متن تبلیغ یا لندینگ را وارد کنید.');
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('text', textEl.value.trim());
+    if (imageEl && imageEl.files && imageEl.files[0]) {
+        formData.append('image', imageEl.files[0]);
+    }
+
+    // Show loading overlay
+    document.getElementById('loadingOverlay').classList.add('active');
+
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/brain/analyze-with-image`, {
+            method: 'POST',
+            body: formData,
+        });
+
+        if (!response.ok) {
+            const errText = await response.text();
+            throw new Error(`API Error ${response.status}: ${errText}`);
+        }
+
+        const result = await response.json();
+        showVisualProResults(result);
+    } catch (error) {
+        console.error('Visual Pro error:', error);
+        alert('خطا در تحلیل متن + تصویر. لطفاً مطمئن شوید سرور و مدل بصری فعال هستند.');
+    } finally {
+        document.getElementById('loadingOverlay').classList.remove('active');
+    }
+}
+
+// Render combined psychology + visual trust results
+function showVisualProResults(result) {
+    const modal = document.getElementById('resultsModal');
+    const container = document.getElementById('resultsContainer');
+
+    const visual = result.visual_layer || {};
+    const vtLabel = visual.visual_trust_label || (result.visual_trust && result.visual_trust.label) || 'N/A';
+    const vtScore = visual.visual_trust_score ?? (result.visual_trust && result.visual_trust.score_numeric);
+    const vtComment = visual.visual_comment || 'No visual layer available (no image provided or model not configured).';
+
+    const breakdown = visual.visual_trust_scores
+        || visual.visual_trust_breakdown
+        || (result.visual_trust && result.visual_trust.scores)
+        || {};
+
+    const overall = result.overall || {};
+    const human = result.human_readable_report || '';
+
+    const breakdownHtml = Object.keys(breakdown).length
+        ? `<ul>${Object.entries(breakdown)
+              .map(([k, v]) => `<li><strong>${k}:</strong> ${(v * 100).toFixed(1)}%</li>`)
+              .join('')}</ul>`
+        : '<p>No visual scores available.</p>';
+
+    container.innerHTML = `
+        <div class="results-header">
+            <h2>Decision Psychology + Visual Trust (Pro)</h2>
+        </div>
+
+        <div class="results-section">
+            <h3>Core Psychology Engine (Text)</h3>
+            <pre class="results-pre">${human}</pre>
+        </div>
+
+        <div class="results-section">
+            <h3>Visual Layer</h3>
+            <p><strong>Visual trust label:</strong> ${vtLabel}</p>
+            <p><strong>Visual trust score:</strong> ${vtScore != null ? vtScore.toFixed(1) : 'N/A'}</p>
+            <p><strong>Comment:</strong> ${vtComment}</p>
+            <h4>Score breakdown</h4>
+            ${breakdownHtml}
+        </div>
+    `;
+
+    modal.style.display = 'block';
+}
+
 // Format Markdown to HTML (simple version)
 function formatMarkdown(text) {
     // Headers

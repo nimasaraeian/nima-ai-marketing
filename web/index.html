@@ -175,6 +175,31 @@
         </div>
     </div>
 
+    <!-- Visual Trust + Psychology (Pro) Section -->
+    <section class="modules-section" id="visual-pro">
+        <div class="container">
+            <h2 class="section-title">Decision Psychology + Visual Trust (Pro)</h2>
+            <p class="hero-description">
+                Analyze your ad or landing page text with the Core Psychology Engine and optionally attach a visual
+                (screenshot or creative). The engine will add a simple visual trust layer on top of the text analysis.
+            </p>
+
+            <form id="visualProForm" class="module-card" onsubmit="submitVisualPsychologyWithImage(event)">
+                <div class="form-group">
+                    <label class="form-label" for="visualProText">Ad / landing page copy</label>
+                    <textarea id="visualProText" class="form-textarea" name="text" placeholder="Paste your ad or landing page text here..." required></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="visualProImage">Optional image (screenshot / creative)</label>
+                    <input id="visualProImage" type="file" accept="image/*" class="form-input" />
+                </div>
+
+                <button type="submit" class="btn btn-primary">Analyze Text + Visual</button>
+            </form>
+        </div>
+    </section>
+
     <!-- Loading Overlay -->
     <div id="loadingOverlay" class="loading-overlay">
         <div class="loading-spinner"></div>
