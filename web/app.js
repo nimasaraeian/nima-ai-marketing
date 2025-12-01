@@ -265,43 +265,260 @@ function showVisualProResults(result) {
     const modal = document.getElementById('resultsModal');
     const container = document.getElementById('resultsContainer');
 
+    // Extract analysis data
+    const analysis = result.analysis || {};
+    const overall = result.overall || {};
     const visual = result.visual_layer || {};
+    
+    // Extract pillar scores
+    const cognitiveFriction = analysis.cognitive_friction || {};
+    const emotionalResonance = analysis.emotional_resonance || {};
+    const trustClarity = analysis.trust_clarity || {};
+    
+    // Calculate main friction score (average of key pillars or use global score)
+    // Friction is inverse of quality: high global score = low friction
+    const frictionScore = overall.global_score != null 
+        ? Math.max(0, Math.min(100, 100 - overall.global_score)) // Invert: higher global score = lower friction
+        : cognitiveFriction.score != null 
+            ? cognitiveFriction.score 
+            : 50;
+    
+    // Get sub-scores with fallbacks
+    const cfScore = cognitiveFriction.score ?? cognitiveFriction.friction_score ?? 50;
+    const erScore = emotionalResonance.score ?? emotionalResonance.emotional_resonance_score ?? 50;
+    const tcScore = trustClarity.score ?? trustClarity.trust_score ?? 50;
+    
+    // Decision Likelihood - try multiple possible locations
+    let decisionLikelihood = overall.decision_likelihood_percentage ?? 
+                             overall.decision_likelihood ?? 
+                             overall.decisionProbability ? (overall.decisionProbability * 100) : null;
+    
+    // Conversion Impact - calculate if not provided
+    // Formula: Based on how much improvement is possible if issues are fixed
+    // If decision likelihood is low, there's high potential for improvement
+    let conversionImpact = overall.conversion_lift_estimate ?? 
+                          overall.conversionLiftEstimate ?? null;
+    
+    if (conversionImpact == null && decisionLikelihood != null) {
+        // Estimate conversion impact based on decision likelihood
+        // If likelihood is below 50%, there's potential for positive impact
+        // If likelihood is above 70%, impact is lower (already good)
+        if (decisionLikelihood < 50) {
+            conversionImpact = (50 - decisionLikelihood) * 1.5; // Potential improvement
+        } else if (decisionLikelihood < 70) {
+            conversionImpact = (70 - decisionLikelihood) * 0.8; // Moderate improvement
+        } else {
+            conversionImpact = Math.max(0, (100 - decisionLikelihood) * 0.3); // Small improvement
+        }
+    } else if (conversionImpact == null) {
+        // Fallback: estimate based on friction and trust scores
+        const avgScore = (cfScore + erScore + tcScore) / 3;
+        if (avgScore < 50) {
+            conversionImpact = (50 - avgScore) * 1.2; // High potential
+        } else {
+            conversionImpact = Math.max(0, (100 - avgScore) * 0.5); // Lower potential
+        }
+    }
+    
+    // Get blockers and factors - handle different data structures
+    const keyBlockers = cognitiveFriction.reasons || 
+                       cognitiveFriction.issues || 
+                       cognitiveFriction.keyDecisionBlockers ||
+                       (Array.isArray(cognitiveFriction.blockers) ? cognitiveFriction.blockers : []) ||
+                       [];
+    
+    const emotionalResistance = emotionalResonance.resistance_factors || 
+                               emotionalResonance.emotionalResistanceFactors ||
+                               emotionalResonance.issues ||
+                               [];
+    
+    const cognitiveOverload = cognitiveFriction.overload_factors || 
+                              cognitiveFriction.cognitiveOverloadFactors ||
+                              cognitiveFriction.overload ||
+                              [];
+    
+    const trustBreakpoints = trustClarity.breakpoints || 
+                            trustClarity.trustBreakpoints ||
+                            trustClarity.issues ||
+                            [];
+    
+    // Get recommendations - handle different structures
+    let quickWins = [];
+    if (overall.recommendedQuickWins && Array.isArray(overall.recommendedQuickWins)) {
+        quickWins = overall.recommendedQuickWins;
+    } else if (overall.quick_wins && Array.isArray(overall.quick_wins)) {
+        quickWins = overall.quick_wins;
+    } else if (overall.priority_fixes && Array.isArray(overall.priority_fixes)) {
+        quickWins = overall.priority_fixes.slice(0, 3).map(f => 
+            typeof f === 'string' ? f : (f.issue || f.explanation || f)
+        ).filter(Boolean);
+    }
+    
+    let deepChanges = [];
+    if (overall.recommendedDeepChanges && Array.isArray(overall.recommendedDeepChanges)) {
+        deepChanges = overall.recommendedDeepChanges;
+    } else if (overall.final_recommendations && Array.isArray(overall.final_recommendations)) {
+        deepChanges = overall.final_recommendations;
+    } else if (overall.priority_fixes && Array.isArray(overall.priority_fixes)) {
+        deepChanges = overall.priority_fixes.slice(3).map(f => 
+            typeof f === 'string' ? f : (f.issue || f.explanation || f)
+        ).filter(Boolean);
+    }
+    
+    // Visual trust data
     const vtLabel = visual.visual_trust_label || (result.visual_trust && result.visual_trust.label) || 'N/A';
     const vtScore = visual.visual_trust_score ?? (result.visual_trust && result.visual_trust.score_numeric);
     const vtComment = visual.visual_comment || 'No visual layer available (no image provided or model not configured).';
 
-    const breakdown = visual.visual_trust_scores
-        || visual.visual_trust_breakdown
-        || (result.visual_trust && result.visual_trust.scores)
-        || {};
-
-    const overall = result.overall || {};
-    const human = result.human_readable_report || '';
-
-    const breakdownHtml = Object.keys(breakdown).length
-        ? `<ul>${Object.entries(breakdown)
-              .map(([k, v]) => `<li><strong>${k}:</strong> ${(v * 100).toFixed(1)}%</li>`)
-              .join('')}</ul>`
-        : '<p>No visual scores available.</p>';
+    // Helper function to get status badge
+    function getStatusBadge(score) {
+        if (score >= 70) return '<span class="status-badge status-good">Good</span>';
+        if (score >= 50) return '<span class="status-badge status-medium">Moderate</span>';
+        if (score >= 30) return '<span class="status-badge status-warning">Warning</span>';
+        return '<span class="status-badge status-critical">Critical</span>';
+    }
+    
+    // Helper function to format percentage
+    function formatPercent(value) {
+        if (value == null || isNaN(value)) return 'NaN';
+        return value.toFixed(1) + '%';
+    }
+    
+    // Helper function to format score
+    function formatScore(value) {
+        if (value == null || isNaN(value)) return 'NaN';
+        return Math.round(value);
+    }
 
     container.innerHTML = `
         <div class="results-header">
-            <h2>Decision Psychology + Visual Trust (Pro)</h2>
+            <h2>Decision Psychology Report</h2>
+            <span class="ai-analysis-badge">AI Analysis</span>
         </div>
 
-        <div class="results-section">
-            <h3>Core Psychology Engine (Text)</h3>
-            <pre class="results-pre">${human}</pre>
+        <!-- Decision Friction Score Section -->
+        <div class="dashboard-section">
+            <div class="friction-score-card">
+                <div class="score-header">
+                    <span class="score-icon">🎯</span>
+                    <h3>Decision Friction Score</h3>
+                </div>
+                <div class="score-value">${formatScore(frictionScore)} / 100</div>
+                <div class="progress-bar-container">
+                    <div class="progress-bar" style="width: ${Math.min(100, frictionScore)}%; background: ${frictionScore > 60 ? '#ef4444' : frictionScore > 40 ? '#f59e0b' : '#10b981'};"></div>
+                </div>
+                ${getStatusBadge(100 - frictionScore)}
+            </div>
         </div>
 
-        <div class="results-section">
-            <h3>Visual Layer</h3>
-            <p><strong>Visual trust label:</strong> ${vtLabel}</p>
-            <p><strong>Visual trust score:</strong> ${vtScore != null ? vtScore.toFixed(1) : 'N/A'}</p>
-            <p><strong>Comment:</strong> ${vtComment}</p>
-            <h4>Score breakdown</h4>
-            ${breakdownHtml}
+        <!-- Sub-Scores Section -->
+        <div class="dashboard-section">
+            <div class="sub-scores-grid">
+                <div class="sub-score-card">
+                    <span class="sub-score-icon">⚡</span>
+                    <h4>Cognitive Friction</h4>
+                    <div class="sub-score-value">${formatScore(cfScore)} / 100</div>
+                    ${getStatusBadge(100 - cfScore)}
+                    <div class="mini-progress-bar" style="width: ${Math.min(100, cfScore)}%; background: ${cfScore > 60 ? '#ef4444' : '#f59e0b'};"></div>
+                </div>
+                <div class="sub-score-card">
+                    <span class="sub-score-icon">✨</span>
+                    <h4>Emotional Resonance</h4>
+                    <div class="sub-score-value">${formatScore(erScore)} / 100</div>
+                    ${getStatusBadge(erScore)}
+                    <div class="mini-progress-bar" style="width: ${Math.min(100, erScore)}%; background: ${erScore > 60 ? '#10b981' : erScore > 40 ? '#f59e0b' : '#ef4444'};"></div>
+                </div>
+                <div class="sub-score-card">
+                    <span class="sub-score-icon">🛡️</span>
+                    <h4>Trust & Clarity</h4>
+                    <div class="sub-score-value">${formatScore(tcScore)} / 100</div>
+                    ${getStatusBadge(tcScore)}
+                    <div class="mini-progress-bar" style="width: ${Math.min(100, tcScore)}%; background: ${tcScore > 60 ? '#10b981' : tcScore > 40 ? '#f59e0b' : '#ef4444'};"></div>
+                </div>
+                <div class="sub-score-card">
+                    <span class="sub-score-icon">📈</span>
+                    <h4>Action Triggers</h4>
+                    <div class="action-metrics">
+                        <div>Decision Likelihood ${formatPercent(decisionLikelihood)}</div>
+                        <div>Conversion Impact ${formatPercent(conversionImpact)}</div>
+                    </div>
+                </div>
+            </div>
         </div>
+
+        <!-- Decision Blockers Section -->
+        <div class="dashboard-section">
+            <h3 class="section-title">Decision Blockers & Psychological Factors</h3>
+            <div class="blockers-grid">
+                <div class="blocker-card">
+                    <span class="blocker-icon">⚡</span>
+                    <h4>Key Decision Blockers</h4>
+                    <p>${keyBlockers.length > 0 ? keyBlockers.slice(0, 3).join(', ') : 'No major blockers detected.'}</p>
+                </div>
+                <div class="blocker-card">
+                    <span class="blocker-icon">✨</span>
+                    <h4>Emotional Resistance</h4>
+                    <p>${emotionalResistance.length > 0 ? emotionalResistance.slice(0, 3).join(', ') : 'No major emotional resistance detected.'}</p>
+                </div>
+                <div class="blocker-card">
+                    <span class="blocker-icon">🧠</span>
+                    <h4>Cognitive Overload</h4>
+                    <p>${cognitiveOverload.length > 0 ? cognitiveOverload.slice(0, 3).join(', ') : 'No cognitive overload detected.'}</p>
+                </div>
+                <div class="blocker-card">
+                    <span class="blocker-icon">🛡️</span>
+                    <h4>Trust Breakpoints</h4>
+                    <p>${trustBreakpoints.length > 0 ? trustBreakpoints.slice(0, 3).join(', ') : 'No trust breakpoints detected.'}</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- AI Recommendations Section -->
+        <div class="dashboard-section">
+            <h3 class="section-title">AI Recommendations</h3>
+            <div class="recommendations-grid">
+                <div class="recommendation-card">
+                    <span class="recommendation-icon">⚡</span>
+                    <h4>Quick Wins</h4>
+                    <p>Immediate changes to reduce friction fast.</p>
+                    <div class="recommendation-content">
+                        ${quickWins.length > 0 ? `<ul>${quickWins.map(w => `<li>${w}</li>`).join('')}</ul>` : '<p>No quick wins available.</p>'}
+                    </div>
+                </div>
+                <div class="recommendation-card">
+                    <span class="recommendation-icon">🎯</span>
+                    <h4>Deep Changes</h4>
+                    <p>Structural and strategic improvements for long-term impact.</p>
+                    <div class="recommendation-content">
+                        ${deepChanges.length > 0 ? `<ul>${deepChanges.map(c => `<li>${c}</li>`).join('')}</ul>` : '<p>No deep changes available.</p>'}
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Decision Psychology Summary -->
+        <div class="dashboard-section">
+            <h3 class="section-title">Decision Psychology Summary</h3>
+            <div class="summary-content">
+                <p>${overall.summary || 
+                   overall.explanationSummary || 
+                   (result.explanationSummary ? result.explanationSummary : '') ||
+                   (result.human_readable_report ? result.human_readable_report.substring(0, 500) + '...' : '') ||
+                   'Analysis completed. Review the scores and recommendations above.'}</p>
+            </div>
+        </div>
+
+        <!-- Visual Layer (if available) -->
+        ${vtScore != null ? `
+        <div class="dashboard-section">
+            <h3 class="section-title">Visual Trust Layer</h3>
+            <div class="visual-trust-info">
+                <p><strong>Visual trust label:</strong> ${vtLabel}</p>
+                <p><strong>Visual trust score:</strong> ${vtScore.toFixed(1)}</p>
+                <p><strong>Comment:</strong> ${vtComment}</p>
+            </div>
+        </div>
+        ` : ''}
     `;
 
     modal.style.display = 'block';
