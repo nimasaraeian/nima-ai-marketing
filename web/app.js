@@ -342,6 +342,13 @@ function showVisualProResults(result) {
                             trustClarity.issues ||
                             [];
     
+    // Get motivation misalignments
+    const motivationProfile = analysis.motivation_profile || {};
+    const motivationMisalignments = motivationProfile.misalignment_signals ||
+                                   analysis.motivationMisalignments ||
+                                   (result.motivationMisalignments ? result.motivationMisalignments : []) ||
+                                   [];
+    
     // Get recommendations - handle different structures
     let quickWins = [];
     if (overall.recommendedQuickWins && Array.isArray(overall.recommendedQuickWins)) {
@@ -371,11 +378,21 @@ function showVisualProResults(result) {
     const vtComment = visual.visual_comment || 'No visual layer available (no image provided or model not configured).';
 
     // Helper function to get status badge
-    function getStatusBadge(score) {
-        if (score >= 70) return '<span class="status-badge status-good">Good</span>';
-        if (score >= 50) return '<span class="status-badge status-medium">Moderate</span>';
-        if (score >= 30) return '<span class="status-badge status-warning">Warning</span>';
-        return '<span class="status-badge status-critical">Critical</span>';
+    // For positive metrics (higher is better): emotional resonance, trust & clarity
+    function getStatusBadge(score, isPositive = true) {
+        if (!isPositive) {
+            // For negative metrics (lower is better): friction
+            if (score <= 30) return '<span class="status-badge status-good">Excellent</span>';
+            if (score <= 50) return '<span class="status-badge status-medium">Moderate</span>';
+            if (score <= 70) return '<span class="status-badge status-warning">Warning</span>';
+            return '<span class="status-badge status-critical">Critical</span>';
+        } else {
+            // For positive metrics (higher is better)
+            if (score >= 70) return '<span class="status-badge status-good">Excellent</span>';
+            if (score >= 50) return '<span class="status-badge status-medium">Moderate</span>';
+            if (score >= 30) return '<span class="status-badge status-warning">Warning</span>';
+            return '<span class="status-badge status-critical">Critical</span>';
+        }
     }
     
     // Helper function to format percentage
@@ -407,7 +424,7 @@ function showVisualProResults(result) {
                 <div class="progress-bar-container">
                     <div class="progress-bar" style="width: ${Math.min(100, frictionScore)}%; background: ${frictionScore > 60 ? '#ef4444' : frictionScore > 40 ? '#f59e0b' : '#10b981'};"></div>
                 </div>
-                ${getStatusBadge(100 - frictionScore)}
+                ${getStatusBadge(frictionScore, false)}
             </div>
         </div>
 
@@ -418,21 +435,21 @@ function showVisualProResults(result) {
                     <span class="sub-score-icon">⚡</span>
                     <h4>Cognitive Friction</h4>
                     <div class="sub-score-value">${formatScore(cfScore)} / 100</div>
-                    ${getStatusBadge(100 - cfScore)}
+                    ${getStatusBadge(cfScore, false)}
                     <div class="mini-progress-bar" style="width: ${Math.min(100, cfScore)}%; background: ${cfScore > 60 ? '#ef4444' : '#f59e0b'};"></div>
                 </div>
                 <div class="sub-score-card">
                     <span class="sub-score-icon">✨</span>
                     <h4>Emotional Resonance</h4>
                     <div class="sub-score-value">${formatScore(erScore)} / 100</div>
-                    ${getStatusBadge(erScore)}
+                    ${getStatusBadge(erScore, true)}
                     <div class="mini-progress-bar" style="width: ${Math.min(100, erScore)}%; background: ${erScore > 60 ? '#10b981' : erScore > 40 ? '#f59e0b' : '#ef4444'};"></div>
                 </div>
                 <div class="sub-score-card">
                     <span class="sub-score-icon">🛡️</span>
                     <h4>Trust & Clarity</h4>
                     <div class="sub-score-value">${formatScore(tcScore)} / 100</div>
-                    ${getStatusBadge(tcScore)}
+                    ${getStatusBadge(tcScore, true)}
                     <div class="mini-progress-bar" style="width: ${Math.min(100, tcScore)}%; background: ${tcScore > 60 ? '#10b981' : tcScore > 40 ? '#f59e0b' : '#ef4444'};"></div>
                 </div>
                 <div class="sub-score-card">
@@ -453,22 +470,37 @@ function showVisualProResults(result) {
                 <div class="blocker-card">
                     <span class="blocker-icon">⚡</span>
                     <h4>Key Decision Blockers</h4>
-                    <p>${keyBlockers.length > 0 ? keyBlockers.slice(0, 3).join(', ') : 'No major blockers detected.'}</p>
+                    ${keyBlockers.length > 0 
+                        ? `<ul class="blocker-list">${keyBlockers.slice(0, 3).map(b => `<li>${b}</li>`).join('')}</ul>`
+                        : '<p>No major blockers detected.</p>'}
                 </div>
                 <div class="blocker-card">
                     <span class="blocker-icon">✨</span>
                     <h4>Emotional Resistance</h4>
-                    <p>${emotionalResistance.length > 0 ? emotionalResistance.slice(0, 3).join(', ') : 'No major emotional resistance detected.'}</p>
+                    ${emotionalResistance.length > 0 
+                        ? `<ul class="blocker-list">${emotionalResistance.slice(0, 3).map(r => `<li>${r}</li>`).join('')}</ul>`
+                        : '<p>No major emotional resistance detected.</p>'}
                 </div>
                 <div class="blocker-card">
                     <span class="blocker-icon">🧠</span>
                     <h4>Cognitive Overload</h4>
-                    <p>${cognitiveOverload.length > 0 ? cognitiveOverload.slice(0, 3).join(', ') : 'No cognitive overload detected.'}</p>
+                    ${cognitiveOverload.length > 0 
+                        ? `<ul class="blocker-list">${cognitiveOverload.slice(0, 3).map(o => `<li>${o}</li>`).join('')}</ul>`
+                        : '<p>No cognitive overload detected.</p>'}
                 </div>
                 <div class="blocker-card">
                     <span class="blocker-icon">🛡️</span>
                     <h4>Trust Breakpoints</h4>
-                    <p>${trustBreakpoints.length > 0 ? trustBreakpoints.slice(0, 3).join(', ') : 'No trust breakpoints detected.'}</p>
+                    ${trustBreakpoints.length > 0 
+                        ? `<ul class="blocker-list">${trustBreakpoints.slice(0, 3).map(t => `<li>${t}</li>`).join('')}</ul>`
+                        : '<p>No trust breakpoints detected.</p>'}
+                </div>
+                <div class="blocker-card">
+                    <span class="blocker-icon">🎯</span>
+                    <h4>Motivation Misalignments</h4>
+                    ${motivationMisalignments.length > 0 
+                        ? `<ul class="blocker-list">${motivationMisalignments.slice(0, 3).map(m => `<li>${m}</li>`).join('')}</ul>`
+                        : '<p>No alignment with user needs or desires.</p>'}
                 </div>
             </div>
         </div>
@@ -500,11 +532,11 @@ function showVisualProResults(result) {
         <div class="dashboard-section">
             <h3 class="section-title">Decision Psychology Summary</h3>
             <div class="summary-content">
-                <p>${overall.summary || 
+                ${overall.summary || 
                    overall.explanationSummary || 
                    (result.explanationSummary ? result.explanationSummary : '') ||
-                   (result.human_readable_report ? result.human_readable_report.substring(0, 500) + '...' : '') ||
-                   'Analysis completed. Review the scores and recommendations above.'}</p>
+                   (result.human_readable_report ? result.human_readable_report : '') ||
+                   'Analysis completed. Review the scores and recommendations above.'}
             </div>
         </div>
 

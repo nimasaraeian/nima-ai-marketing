@@ -664,6 +664,10 @@ body {
     margin-top: 1.5rem;
 }
 
+.blockers-grid:has(.blocker-card:nth-child(5)) {
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
 .blocker-card {
     background: #1e293b;
     padding: 1.5rem;
@@ -689,6 +693,33 @@ body {
     font-size: 0.875rem;
     color: #94a3b8;
     line-height: 1.6;
+}
+
+.blocker-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+}
+
+.blocker-list li {
+    padding: 0.5rem 0;
+    color: #94a3b8;
+    font-size: 0.875rem;
+    line-height: 1.6;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    padding-right: 1rem;
+    position: relative;
+}
+
+.blocker-list li::before {
+    content: "•";
+    position: absolute;
+    right: 0;
+    color: #60a5fa;
+}
+
+.blocker-list li:last-child {
+    border-bottom: none;
 }
 
 .recommendations-grid {
@@ -757,6 +788,11 @@ body {
     border-radius: 0.75rem;
     color: #cbd5e1;
     line-height: 1.8;
+    white-space: pre-wrap;
+}
+
+.summary-content p {
+    margin: 0;
 }
 
 .visual-trust-info {
