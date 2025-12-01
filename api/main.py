@@ -179,13 +179,24 @@ async def brain_endpoint(
         print("=" * 60 + "\n")
 
         # Get response (supports text-only, image-only, or both)
-        response_text = chat_completion_with_image(
-            user_message=content_processed,  # ممکن است خالی باشد
-            image_base64=image_base64,
-            image_mime=image_mime,
-            model="gpt-4o-mini",
-            temperature=0.7
-        )
+        try:
+            response_text = chat_completion_with_image(
+                user_message=content_processed,  # ممکن است خالی باشد
+                image_base64=image_base64,
+                image_mime=image_mime,
+                model="gpt-4o-mini",
+                temperature=0.7
+            )
+        except Exception as api_error:
+            # Catch API errors separately to provide better error messages
+            print(f"⚠️ OpenAI API error: {type(api_error).__name__}: {api_error}")
+            error_msg = "Failed to get response from AI model. Please try again."
+            return BrainResponse(
+                response=f"Error: {error_msg}",
+                model="gpt-4o-mini",
+                quality_score=0,
+                quality_checks={"error": True, "error_type": "api_error"}
+            )
 
         # Quality checks (simplified since we don't have city/industry context anymore)
         quality_checks = {
@@ -211,7 +222,13 @@ async def brain_endpoint(
         import traceback
         traceback.print_exc()
         # Return error in BrainResponse format to maintain API contract
+        # Clean error message to avoid exposing internal JSON parsing errors
         error_message = str(e) if str(e) else "Internal error while analyzing content."
+        
+        # Check if this is a JSON parsing error and provide a user-friendly message
+        if "JSON" in error_message or "json" in error_message.lower() or "No number after minus sign" in error_message:
+            error_message = "Model response format error. The AI returned an unexpected format. Please try again."
+        
         return BrainResponse(
             response=f"Error: {error_message}. Please try again later or contact support if the issue persists.",
             model="gpt-4o-mini",

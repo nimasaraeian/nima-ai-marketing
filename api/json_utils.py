@@ -75,9 +75,19 @@ def safe_parse_json(raw: str, context: str = "model response") -> Dict[str, Any]
     except json.JSONDecodeError as e:
         # Log the problematic output for debugging
         preview = trimmed[:500] if len(trimmed) > 500 else trimmed
+        # Check for common error patterns
+        error_str = str(e)
+        if "No number after minus sign" in error_str or trimmed.startswith("-"):
+            print(f"⚠️ Model returned markdown/bullet point instead of JSON: {repr(preview[:100])}")
+            raise ValueError(
+                f"{context} returned non-JSON format (likely markdown or bullet points). "
+                f"Expected JSON object starting with '{{' or '['. "
+                f"Got: {repr(preview[:50])}"
+            ) from e
+        
         error_msg = (
             f"Failed to parse {context} as JSON. "
-            f"Error: {str(e)}. "
+            f"Error: {error_str}. "
             f"Raw output preview: {repr(preview)}"
         )
         print(f"⚠️ {error_msg}")
