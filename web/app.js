@@ -232,17 +232,40 @@ async function submitVisualPsychologyWithImage(event) {
 
     const formData = new FormData();
     formData.append('text', textEl.value.trim());
+    
+    let hasImage = false;
     if (imageEl && imageEl.files && imageEl.files[0]) {
-        formData.append('image', imageEl.files[0]);
+        const imageFile = imageEl.files[0];
+        console.log('Image file selected:', {
+            name: imageFile.name,
+            size: imageFile.size,
+            type: imageFile.type
+        });
+        
+        if (imageFile.size === 0) {
+            alert('فایل تصویر خالی است. لطفاً یک تصویر معتبر انتخاب کنید.');
+            return;
+        }
+        
+        formData.append('image', imageFile);
+        hasImage = true;
+    } else {
+        console.log('No image file selected');
     }
 
     // Show loading overlay
     document.getElementById('loadingOverlay').classList.add('active');
 
     try {
+        console.log(`Sending request to ${API_BASE_URL}/api/brain/analyze-with-image`, {
+            hasText: textEl.value.trim().length > 0,
+            hasImage: hasImage
+        });
+        
         const response = await fetch(`${API_BASE_URL}/api/brain/analyze-with-image`, {
             method: 'POST',
             body: formData,
+            // Don't set Content-Type header - browser will set it automatically with boundary for FormData
         });
 
         if (!response.ok) {

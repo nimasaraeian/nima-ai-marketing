@@ -514,11 +514,28 @@ async def psychology_analysis_with_image(
 
         try:
             # Save uploaded image to a temporary file
+            print(f"[VISUAL_ANALYSIS] Reading image file: {image.filename}, content_type: {image.content_type}")
+            
+            # Reset file pointer to beginning (in case it was read before)
+            await image.seek(0)
+            content = await image.read()
+            
+            if not content or len(content) == 0:
+                raise ValueError(f"Image file is empty or could not be read: {image.filename}")
+            
+            print(f"[VISUAL_ANALYSIS] Image read successfully: {len(content)} bytes")
+            
             with tmp_path.open("wb") as buffer:
-                content = await image.read()
                 buffer.write(content)
-
+            
+            # Verify file was written
+            if not tmp_path.exists() or tmp_path.stat().st_size == 0:
+                raise ValueError(f"Failed to save image to temporary path: {tmp_path}")
+            
+            print(f"[VISUAL_ANALYSIS] Image saved to: {tmp_path} ({tmp_path.stat().st_size} bytes)")
+            
             vt = analyze_visual_trust_from_path(str(tmp_path))
+            print(f"[VISUAL_ANALYSIS] Visual trust analysis completed: {vt.get('trust_label', 'unknown')}")
 
             visual_trust = {
                 "label": vt.get("trust_label"),
@@ -535,15 +552,47 @@ async def psychology_analysis_with_image(
             }
         except FileNotFoundError as e:
             # Model not trained or file issue: surface as 400 so user can fix setup
-            raise HTTPException(status_code=400, detail=str(e))
+            error_msg = str(e)
+            print(f"\n❌ FileNotFoundError in visual analysis: {error_msg}")
+            if "model not found" in error_msg.lower() or "visual_trust_model" in error_msg.lower():
+                # Model not trained - provide helpful message
+                visual_trust = {
+                    "error": "Visual trust model not trained. The text analysis completed successfully, but visual analysis requires training the model first.",
+                    "model_missing": True
+                }
+                visual_layer = {
+                    "visual_trust_label": "N/A",
+                    "visual_trust_score": None,
+                    "visual_comment": "Visual trust model is not available. Please train the model first using: python training/train_visual_trust_model.py"
+                }
+            else:
+                raise HTTPException(status_code=400, detail=error_msg)
+        except ValueError as e:
+            # Image reading/saving issues
+            error_msg = str(e)
+            print(f"\n❌ ValueError in visual analysis: {error_msg}")
+            visual_trust = {"error": f"Image processing error: {error_msg}"}
+            visual_layer = {
+                "visual_trust_label": "N/A",
+                "visual_trust_score": None,
+                "visual_comment": f"Could not process image: {error_msg}"
+            }
         except Exception as e:
             import traceback
 
-            print(f"\n❌ ERROR in psychology_analysis_with_image (visual analysis): {type(e).__name__}: {e}")
+            error_msg = str(e)
+            print(f"\n❌ ERROR in psychology_analysis_with_image (visual analysis): {type(e).__name__}: {error_msg}")
             traceback.print_exc()
             # We don't want to lose the text analysis result if visual fails
-            visual_trust = {"error": str(e)}
-            visual_layer = None
+            visual_trust = {
+                "error": f"Visual analysis failed: {error_msg}",
+                "error_type": type(e).__name__
+            }
+            visual_layer = {
+                "visual_trust_label": "N/A",
+                "visual_trust_score": None,
+                "visual_comment": f"Visual analysis encountered an error: {error_msg}"
+            }
         finally:
             # Clean up temporary file
             try:
