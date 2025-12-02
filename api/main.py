@@ -162,8 +162,12 @@ async def brain_test(
     }
 
 
-@app.post("/api/brain", response_model=BrainResponse)
-async def brain_endpoint(request: Request):
+@app.post("/api/brain")
+async def brain_endpoint(
+    request: Request,
+    content: Optional[str] = Form(None),
+    image: Optional[UploadFile] = File(None),
+):
     """
     Brain endpoint for marketing strategy queries.
     Accepts both JSON and multipart/form-data:
@@ -177,7 +181,16 @@ async def brain_endpoint(request: Request):
     
     At least one of content or image must be provided.
     """
+    import logging
+    import io
+    
+    logger = logging.getLogger("brain")
     MIN_TEXT_LENGTH = 0  # عملاً بی‌اثر، فقط می‌گذاریم اگر بعداً خواستی هشدار بدهی
+    
+    # Image debug variables
+    has_image = False
+    image_filename = None
+    image_size_bytes = 0
     
     try:
         # Log request info
@@ -185,6 +198,8 @@ async def brain_endpoint(request: Request):
         print("=== NIMA BRAIN REQUEST ===")
         content_type = request.headers.get("content-type", "")
         print(f"[/api/brain] Content-Type: {content_type}")
+        
+        logger.warning("📩 /api/brain called, content=%s", content)
         
         # Determine if request is JSON or multipart
         content_processed = ""
@@ -219,31 +234,64 @@ async def brain_endpoint(request: Request):
             
         else:
             # Handle multipart/form-data request (with image support)
-            form_data = await request.form()
-            content = form_data.get("content")
-            image = form_data.get("image")
-            
-            if content:
-                content_processed = content.strip() if isinstance(content, str) else str(content)
+            # Use Form/File parameters if provided, otherwise parse from request
+            if content is not None:
+                content_processed = content.strip()
+                print(f"[/api/brain] Content from Form parameter: {len(content_processed)} chars")
             else:
-                content_processed = ""
-            
-            print(f"[/api/brain] content length: {len(content_processed)}")
-            
-            # Handle image if provided
-            if image:
-                # image could be UploadFile or a form field
-                if hasattr(image, 'read'):
-                    # It's an UploadFile
-                    image_file: UploadFile = image
-                    image_bytes = await image_file.read()
-                    image_base64 = base64.b64encode(image_bytes).decode('utf-8')
-                    image_mime = image_file.content_type or "image/png"
-                    print(f"[/api/brain] Image received: {image_file.filename}, type: {image_mime}, size: {len(image_bytes)} bytes")
+                form_data = await request.form()
+                content_field = form_data.get("content")
+                if content_field:
+                    content_processed = content_field.strip() if isinstance(content_field, str) else str(content_field)
                 else:
-                    print(f"[/api/brain] Image field exists but is not a file")
+                    content_processed = ""
+                print(f"[/api/brain] Content from form_data: {len(content_processed)} chars")
+            
+            # Handle image - prioritize File parameter, then form_data
+            if image is not None:
+                has_image = True
+                await image.seek(0)
+                image_data = await image.read()
+                image_filename = image.filename
+                image_size_bytes = len(image_data)
+                
+                logger.warning("📸 Image received: filename=%s, size=%d bytes", image_filename, image_size_bytes)
+                logger.warning("🔍 First 50 bytes: %s", image_data[:50])
+                
+                # Reset file cursor for further processing
+                image.file = io.BytesIO(image_data)
+                
+                # Convert to base64 for OpenAI API
+                image_base64 = base64.b64encode(image_data).decode('utf-8')
+                image_mime = image.content_type or "image/png"
+                print(f"[/api/brain] Image received: {image_filename}, type: {image_mime}, size: {image_size_bytes} bytes")
             else:
-                print(f"[/api/brain] has image? False")
+                # Try to get from form_data (if not already read)
+                if content is None:
+                    form_data = await request.form()
+                else:
+                    # form_data already read above, get it again
+                    form_data = await request.form()
+                
+                image_field = form_data.get("image")
+                if image_field and hasattr(image_field, 'read'):
+                    has_image = True
+                    image_file: UploadFile = image_field
+                    await image_file.seek(0)
+                    image_data = await image_file.read()
+                    image_filename = image_file.filename
+                    image_size_bytes = len(image_data)
+                    
+                    logger.warning("📸 Image received from form_data: filename=%s, size=%d bytes", image_filename, image_size_bytes)
+                    logger.warning("🔍 First 50 bytes: %s", image_data[:50])
+                    
+                    image_base64 = base64.b64encode(image_data).decode('utf-8')
+                    image_mime = image_file.content_type or "image/png"
+                    print(f"[/api/brain] Image received: {image_filename}, type: {image_mime}, size: {image_size_bytes} bytes")
+                else:
+                    logger.warning("🚫 No image uploaded in this request")
+                    image_base64 = None
+                    image_mime = None
         
         # تنها حالت غیرمجاز: نه متن، نه تصویر
         if not content_processed and not image_base64:
@@ -298,12 +346,20 @@ async def brain_endpoint(request: Request):
         
         quality_score = sum(quality_checks.values())
 
-        return BrainResponse(
-            response=response_text,
-            model="gpt-4o-mini",
-            quality_score=quality_score,
-            quality_checks=quality_checks
-        )
+        # Build response with image_debug
+        result = {
+            "response": response_text,
+            "model": "gpt-4o-mini",
+            "quality_score": quality_score,
+            "quality_checks": quality_checks,
+            "image_debug": {
+                "has_image": has_image,
+                "image_filename": image_filename,
+                "image_size_bytes": image_size_bytes,
+            }
+        }
+        
+        return result
     except HTTPException:
         raise
     except Exception as e:
