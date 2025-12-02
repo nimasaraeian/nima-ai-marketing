@@ -11,3 +11,6 @@ openai>=1.0.0
 
 # HTTP requests (for testing and external APIs)
 requests>=2.31.0
+
+# Image processing (PIL)
+Pillow>=10.0.0
