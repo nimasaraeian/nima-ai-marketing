@@ -15,13 +15,28 @@ import os
 import sys
 import base64
 import json
+import logging
+import io
 from pathlib import Path
 from typing import Optional
+from PIL import Image
+import numpy as np
 
 # Add api directory to path for imports
 api_dir = Path(__file__).parent
 if str(api_dir) not in sys.path:
     sys.path.insert(0, str(api_dir))
+
+# Ensure stdout/stderr can emit Unicode characters (e.g., checkmarks) on Windows consoles
+if os.name == "nt":
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8")
+    except Exception:
+        # If reconfigure isn't supported, fall back silently without crashing startup
+        pass
 
 from brain_loader import load_brain_memory
 from chat import chat_completion, chat_completion_with_image
@@ -73,9 +88,138 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Global exception handler to catch any unhandled exceptions
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """
+    Global exception handler to prevent 500 errors from leaking to clients.
+    Returns a proper JSON response instead of letting FastAPI raise HTTPException.
+    """
+    import logging
+    logger = logging.getLogger("brain")
+    
+    error_type = type(exc).__name__
+    error_message = str(exc)
+    
+    logger.error(f"Global exception handler caught: {error_type}: {exc}", exc_info=True)
+    print(f"\n❌ GLOBAL EXCEPTION HANDLER: {error_type}: {exc}")
+    import traceback
+    traceback.print_exc()
+    
+    # For HTTPExceptions, re-raise them (they're intentional)
+    if isinstance(exc, HTTPException):
+        raise exc
+    
+    # For other exceptions, return a BrainResponse to maintain API contract
+    user_friendly_message = "An unexpected error occurred. Please try again later."
+    
+    if "OPENAI_API_KEY" in error_message:
+        user_friendly_message = "OpenAI API key is not configured. Please contact support."
+    elif "timeout" in error_message.lower():
+        user_friendly_message = "Request timed out. Please try again."
+    elif "connection" in error_message.lower():
+        user_friendly_message = "Connection error. Please check your internet connection."
+    
+    from fastapi.responses import JSONResponse
+    # Return 500 with proper error response
+    # This maintains the API contract by returning BrainResponse format
+    return JSONResponse(
+        status_code=500,
+        content={
+            "response": f"Error: {user_friendly_message}",
+            "model": "gpt-4o-mini",
+            "quality_score": 0,
+            "quality_checks": {"error": True, "error_type": error_type},
+            "error_detail": error_message[:200] if len(error_message) > 200 else error_message  # Truncate long messages
+        }
+    )
+
 # Register routers
 app.include_router(dataset_router)
 app.include_router(image_trust_router)
+
+
+# ====================================================
+# Local Image Model Helpers (wired to real visual trust model)
+# ====================================================
+
+_image_model = None
+
+
+def get_image_model():
+    """
+    Lazily load and cache the real visual trust image model used for image_score.
+
+    This reuses the same TensorFlow/Keras model that powers the visual trust engine.
+    """
+    global _image_model
+    logger = logging.getLogger("brain")
+
+    if _image_model is None:
+        logger.warning("🧠 Loading visual trust image model for the first time...")
+        # Import inside the function to avoid circular imports at module load time
+        from visual_trust_engine import _load_model  # type: ignore
+
+        _image_model = _load_model()
+        logger.warning("🧠 Visual trust image model loaded and cached.")
+
+    return _image_model
+
+
+def compute_image_score_from_bytes(data: bytes) -> Optional[float]:
+    """
+    Use Nima's local image model to compute an image score.
+
+    Returns:
+        score in 0–100 range, or None if scoring fails.
+    """
+    logger = logging.getLogger("brain")
+    try:
+        # Ensure the underlying visual trust model is loaded (cached globally)
+        model = get_image_model()
+        _ = model  # prevent linter warnings if unused directly here
+
+        # To stay perfectly aligned with the visual_trust_engine preprocessing and scoring,
+        # we write the bytes to a temporary file and call analyze_visual_trust_from_path.
+        from uuid import uuid4
+        from visual_trust_engine import analyze_visual_trust_from_path
+
+        project_root = Path(__file__).parent.parent
+        tmp_dir = project_root / "dataset" / "tmp_image_score"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+
+        tmp_path = tmp_dir / f"image_score_{uuid4().hex}.jpg"
+
+        with tmp_path.open("wb") as f:
+            f.write(data)
+
+        vt = analyze_visual_trust_from_path(str(tmp_path))
+
+        raw_score = float(vt.get("trust_score_numeric"))
+
+        # raw_score is already designed as a 0–100 style numeric trust score
+        score = raw_score
+
+        # Clip defensively to [0, 100]
+        if score < 0.0:
+            score = 0.0
+        elif score > 100.0:
+            score = 100.0
+
+        logger.warning("🧠 Real image model raw_score=%s, score(0–100)=%s", raw_score, score)
+        return float(score)
+    except Exception as e:
+        logger.error("Error computing image score: %s", e, exc_info=True)
+        return None
+    finally:
+        # Best-effort cleanup of the temporary file
+        try:
+            if "tmp_path" in locals() and tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
+            # Non-fatal if cleanup fails
+            pass
+
 
 # Load system prompt at startup
 SYSTEM_PROMPT = load_brain_memory()
@@ -183,6 +327,7 @@ async def brain_endpoint(
     """
     import logging
     import io
+    import json as json_lib
     
     logger = logging.getLogger("brain")
     MIN_TEXT_LENGTH = 0  # عملاً بی‌اثر، فقط می‌گذاریم اگر بعداً خواستی هشدار بدهی
@@ -191,6 +336,7 @@ async def brain_endpoint(
     has_image = False
     image_filename = None
     image_size_bytes = 0
+    image_score: Optional[float] = None
     
     try:
         # Log request info
@@ -208,8 +354,25 @@ async def brain_endpoint(
         
         if "application/json" in content_type:
             # Handle JSON request (from frontend)
-            body = await request.json()
-            print(f"[/api/brain] JSON request received")
+            try:
+                body = await request.json()
+                print(f"[/api/brain] JSON request received")
+            except json_lib.JSONDecodeError as json_err:
+                logger.error(f"JSON parsing error: {json_err}")
+                return BrainResponse(
+                    response="Error: Invalid JSON format in request. Please check your request data.",
+                    model="gpt-4o-mini",
+                    quality_score=0,
+                    quality_checks={"error": True, "error_type": "json_parse_error"}
+                )
+            except Exception as json_err:
+                logger.error(f"Error parsing JSON request: {json_err}")
+                return BrainResponse(
+                    response="Error: Failed to parse request. Please check your request format.",
+                    model="gpt-4o-mini",
+                    quality_score=0,
+                    quality_checks={"error": True, "error_type": "request_parse_error"}
+                )
             
             # Extract query from JSON body
             query = body.get("query", "")
@@ -261,6 +424,13 @@ async def brain_endpoint(
                 # Reset file cursor for further processing
                 image.file = io.BytesIO(image_data)
                 
+                # Compute local image score using Nima's image model (stubbed for now)
+                if image_size_bytes > 0:
+                    image_score = compute_image_score_from_bytes(image_data)
+                    logger.warning("🧠 Local image_score (from model): %s", image_score)
+                else:
+                    logger.warning("⚠ Empty image data; image_score will be None")
+                
                 # Convert to base64 for OpenAI API
                 image_base64 = base64.b64encode(image_data).decode('utf-8')
                 image_mime = image.content_type or "image/png"
@@ -285,6 +455,13 @@ async def brain_endpoint(
                     logger.warning("📸 Image received from form_data: filename=%s, size=%d bytes", image_filename, image_size_bytes)
                     logger.warning("🔍 First 50 bytes: %s", image_data[:50])
                     
+                    # Compute local image score using Nima's image model (stubbed for now)
+                    if image_size_bytes > 0:
+                        image_score = compute_image_score_from_bytes(image_data)
+                        logger.warning("🧠 Local image_score (from model): %s", image_score)
+                    else:
+                        logger.warning("⚠ Empty image data from form_data; image_score will be None")
+                    
                     image_base64 = base64.b64encode(image_data).decode('utf-8')
                     image_mime = image_file.content_type or "image/png"
                     print(f"[/api/brain] Image received: {image_filename}, type: {image_mime}, size: {image_size_bytes} bytes")
@@ -293,12 +470,24 @@ async def brain_endpoint(
                     image_base64 = None
                     image_mime = None
         
-        # تنها حالت غیرمجاز: نه متن، نه تصویر
+        # Validate: at least one of content or image must be provided
         if not content_processed and not image_base64:
             raise HTTPException(
                 status_code=400,
                 detail="No content or image provided. Please upload a screenshot or paste the landing page/ad copy text."
             )
+
+        # Detect whether we are in visual-only mode (image without text)
+        text_present = bool(content_processed and content_processed.strip())
+        visual_present = bool((image_score is not None) or has_image)
+        visual_only_mode = visual_present and not text_present
+
+        logger.warning(
+            "🧠 Mode detection: text_present=%s, visual_present=%s, visual_only_mode=%s",
+            text_present,
+            visual_present,
+            visual_only_mode,
+        )
         
         print("\n=== SYSTEM PROMPT USED ===")
         print(SYSTEM_PROMPT[:500])
@@ -312,27 +501,60 @@ async def brain_endpoint(
         # Get response (supports text-only, image-only, or both)
         try:
             print(f"[/api/brain] Calling OpenAI API...")
+            if image_score is not None:
+                print(f"[/api/brain] Including image_score: {image_score:.1f} in prompt")
+            print(f"[/api/brain] visual_only_mode={visual_only_mode}")
             response_text = chat_completion_with_image(
                 user_message=content_processed,  # ممکن است خالی باشد
                 image_base64=image_base64,
                 image_mime=image_mime,
+                image_score=image_score,  # Pass image_score to inject into prompt
+                visual_only_mode=visual_only_mode,
                 model="gpt-4o-mini",
                 temperature=0.7
             )
             print(f"[/api/brain] Received response, length: {len(response_text) if response_text else 0}")
             if response_text:
                 print(f"[/api/brain] Response preview: {response_text[:200]}...")
-        except Exception as api_error:
-            # Catch API errors separately to provide better error messages
-            print(f"⚠️ OpenAI API error: {type(api_error).__name__}: {api_error}")
+        except ValueError as api_error:
+            # Catch API key errors and other value errors
+            error_msg = str(api_error)
+            if "OPENAI_API_KEY" in error_msg:
+                error_msg = "OpenAI API key is not configured. Please set OPENAI_API_KEY environment variable."
+            print(f"⚠️ Configuration error: {type(api_error).__name__}: {api_error}")
             import traceback
             traceback.print_exc()
-            error_msg = "Failed to get response from AI model. Please try again."
+            logger.error(f"Configuration error: {api_error}", exc_info=True)
             return BrainResponse(
                 response=f"Error: {error_msg}",
                 model="gpt-4o-mini",
                 quality_score=0,
-                quality_checks={"error": True, "error_type": "api_error"}
+                quality_checks={"error": True, "error_type": "configuration_error"}
+            )
+        except Exception as api_error:
+            # Catch API errors separately to provide better error messages
+            error_type = type(api_error).__name__
+            error_msg = str(api_error)
+            print(f"⚠️ OpenAI API error: {error_type}: {api_error}")
+            import traceback
+            traceback.print_exc()
+            logger.error(f"OpenAI API error: {error_type}: {api_error}", exc_info=True)
+            
+            # Provide user-friendly error messages based on error type
+            if "Authentication" in error_type or "401" in error_msg:
+                user_msg = "OpenAI API authentication failed. Please check your API key."
+            elif "RateLimit" in error_type or "429" in error_msg:
+                user_msg = "OpenAI API rate limit exceeded. Please try again later."
+            elif "Timeout" in error_type or "timeout" in error_msg.lower():
+                user_msg = "Request timed out. Please try again."
+            else:
+                user_msg = "Failed to get response from AI model. Please try again."
+            
+            return BrainResponse(
+                response=f"Error: {user_msg}",
+                model="gpt-4o-mini",
+                quality_score=0,
+                quality_checks={"error": True, "error_type": "api_error", "error_detail": error_type}
             )
 
         # Quality checks (simplified since we don't have city/industry context anymore)
@@ -346,7 +568,9 @@ async def brain_endpoint(
         
         quality_score = sum(quality_checks.values())
 
-        # Build response with image_debug
+        # Build response with image_debug and image_score from local model
+        logger.warning("🚀 DEBUG_VERSION: brain-v2-image-score")
+        
         result = {
             "response": response_text,
             "model": "gpt-4o-mini",
@@ -356,30 +580,44 @@ async def brain_endpoint(
                 "has_image": has_image,
                 "image_filename": image_filename,
                 "image_size_bytes": image_size_bytes,
-            }
+            },
+            "image_score": image_score,
+            "debug_version": "brain-v2-image-score"
         }
         
         return result
     except HTTPException:
+        # Re-raise HTTP exceptions (like 400 Bad Request) as-is
         raise
     except Exception as e:
-        print(f"\n❌ ERROR in brain_endpoint: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
-        # Return error in BrainResponse format to maintain API contract
-        # Clean error message to avoid exposing internal JSON parsing errors
+        error_type = type(e).__name__
         error_message = str(e) if str(e) else "Internal error while analyzing content."
         
-        # Check if this is a JSON parsing error and provide a user-friendly message
+        print(f"\n❌ ERROR in brain_endpoint: {error_type}: {e}")
+        import traceback
+        traceback.print_exc()
+        logger.error(f"Unhandled error in brain_endpoint: {error_type}: {e}", exc_info=True)
+        
+        # Return error in BrainResponse format to maintain API contract
+        # Clean error message to avoid exposing internal details
+        user_friendly_message = "An unexpected error occurred while processing your request."
+        
+        # Check for specific error patterns and provide user-friendly messages
         if "JSON" in error_message or "json" in error_message.lower() or "No number after minus sign" in error_message or "minus sign" in error_message.lower():
             print(f"⚠️ Detected JSON parsing error pattern: {error_message[:100]}")
-            error_message = "Model response format error. The AI returned an unexpected format (possibly markdown or bullet points instead of JSON). Please try again."
+            user_friendly_message = "Model response format error. The AI returned an unexpected format. Please try again."
+        elif "OPENAI_API_KEY" in error_message:
+            user_friendly_message = "OpenAI API key is not configured. Please contact support."
+        elif "timeout" in error_message.lower():
+            user_friendly_message = "Request timed out. Please try again."
+        elif "connection" in error_message.lower() or "network" in error_message.lower():
+            user_friendly_message = "Network connection error. Please check your internet connection and try again."
         
         return BrainResponse(
-            response=f"Error: {error_message}. Please try again later or contact support if the issue persists.",
+            response=f"Error: {user_friendly_message}",
             model="gpt-4o-mini",
             quality_score=0,
-            quality_checks={"error": True, "error_type": type(e).__name__}
+            quality_checks={"error": True, "error_type": error_type}
         )
 
 
@@ -452,12 +690,24 @@ def system_prompt_info():
 
 
 @app.post("/api/brain/cognitive-friction", response_model=CognitiveFrictionResult)
-async def cognitive_friction_endpoint(input_data: CognitiveFrictionInput):
+async def cognitive_friction_endpoint(
+    request: Request,
+    raw_text: Optional[str] = Form(None),
+    platform: Optional[str] = Form(None),
+    goal: Optional[str] = Form(None),
+    audience: Optional[str] = Form(None),
+    language: Optional[str] = Form(None),
+    image: Optional[UploadFile] = File(None),
+):
     """
     Cognitive Friction & Decision Psychology Analysis Endpoint
     
     Analyzes content for cognitive friction, trust, emotional clarity, 
     motivation alignment, and decision probability.
+    
+    Supports both JSON and multipart/form-data:
+    - JSON: Send CognitiveFrictionInput as JSON body
+    - Multipart: Send form fields + optional image file
     
     This endpoint uses a specialized AI brain that focuses on:
     - Decision psychology
@@ -473,9 +723,192 @@ async def cognitive_friction_endpoint(input_data: CognitiveFrictionInput):
     Engine: api/cognitive_friction_engine.py (analysis logic)
     System Prompt: Defined in cognitive_friction_engine.py
     """
+    import json as json_lib
+    
     try:
-        result = analyze_cognitive_friction(input_data)
-        return result
+        # Handle both JSON and form-data requests
+        content_type = request.headers.get("content-type", "")
+        
+        if "application/json" in content_type:
+            # JSON request (may include image as base64 string)
+            try:
+                body = await request.json()
+                
+                # Extract image if provided as base64 string in JSON
+                image_base64 = None
+                image_mime = None
+                image_score_value = None
+                
+                if body.get("image"):
+                    # Image is provided as base64 string
+                    image_base64_raw = body.get("image")
+                    image_mime = body.get("image_type") or body.get("image_mime") or "image/jpeg"
+                    
+                    print(f"[/api/brain/cognitive-friction] Image found in JSON body (length: {len(str(image_base64_raw))} chars, type: {image_mime})")
+                    
+                    # Remove data URL prefix if present (e.g., "data:image/jpeg;base64,")
+                    if isinstance(image_base64_raw, str):
+                        if "," in image_base64_raw:
+                            # Has data URL prefix
+                            image_base64 = image_base64_raw.split(",", 1)[1]
+                            # Extract mime type from prefix if available
+                            prefix = image_base64_raw.split(",", 1)[0]
+                            if "image/" in prefix:
+                                extracted_mime = prefix.split("image/")[1].split(";")[0]
+                                if extracted_mime:
+                                    image_mime = f"image/{extracted_mime}"
+                            print(f"[/api/brain/cognitive-friction] Removed data URL prefix, image_base64 length: {len(image_base64)}")
+                        else:
+                            image_base64 = image_base64_raw
+                    else:
+                        image_base64 = str(image_base64_raw)
+                    
+                    # Decode base64 to bytes for image score computation
+                    try:
+                        import base64 as b64
+                        image_data = b64.b64decode(image_base64)
+                        if len(image_data) > 0:
+                            image_score_value = compute_image_score_from_bytes(image_data)
+                            print(f"[/api/brain/cognitive-friction] Image score from JSON: {image_score_value}")
+                        print(f"[/api/brain/cognitive-friction] Image from JSON: type={image_mime}, size={len(image_data)} bytes")
+                    except Exception as img_err:
+                        print(f"⚠️ Error processing image from JSON: {img_err}")
+                        import traceback
+                        traceback.print_exc()
+                        # Continue without image score, but keep base64 for API call
+                else:
+                    print(f"[/api/brain/cognitive-friction] No image found in JSON body")
+                
+                # Remove image fields from body before creating input_data
+                body_for_input = {k: v for k, v in body.items() if k not in ["image", "image_type", "image_mime", "image_name", "meta"]}
+                
+                # Ensure required fields have defaults
+                if "raw_text" not in body_for_input:
+                    body_for_input["raw_text"] = ""
+                if "platform" not in body_for_input:
+                    body_for_input["platform"] = "landing_page"
+                if "goal" not in body_for_input:
+                    body_for_input["goal"] = ["leads"]
+                if "audience" not in body_for_input:
+                    body_for_input["audience"] = "cold"
+                if "language" not in body_for_input:
+                    body_for_input["language"] = "en"
+                
+                # Ensure goal is a list
+                if isinstance(body_for_input.get("goal"), str):
+                    try:
+                        body_for_input["goal"] = json_lib.loads(body_for_input["goal"])
+                    except:
+                        body_for_input["goal"] = [body_for_input["goal"]]
+                elif not isinstance(body_for_input.get("goal"), list):
+                    body_for_input["goal"] = ["leads"]
+                
+                print(f"[/api/brain/cognitive-friction] Creating input_data with: raw_text='{body_for_input.get('raw_text', '')[:50]}...', platform={body_for_input.get('platform')}, goal={body_for_input.get('goal')}")
+                try:
+                    input_data = CognitiveFrictionInput(**body_for_input)
+                    print(f"[/api/brain/cognitive-friction] ✅ Input data created successfully")
+                except Exception as validation_err:
+                    print(f"[/api/brain/cognitive-friction] ❌ Validation error: {type(validation_err).__name__}: {validation_err}")
+                    import traceback
+                    traceback.print_exc()
+                    raise HTTPException(status_code=400, detail=f"Invalid input data: {str(validation_err)}")
+                
+            except json_lib.JSONDecodeError as json_err:
+                raise HTTPException(status_code=400, detail=f"Invalid JSON: {json_err}")
+            except Exception as parse_err:
+                print(f"❌ Error parsing JSON request: {type(parse_err).__name__}: {parse_err}")
+                import traceback
+                traceback.print_exc()
+                raise HTTPException(status_code=400, detail=f"Error parsing request: {str(parse_err)}")
+        else:
+            # Form-data request (with optional image)
+            # Parse goal as JSON array if provided as string
+            goal_list = ["leads"]  # default
+            if goal:
+                try:
+                    goal_list = json_lib.loads(goal) if isinstance(goal, str) else goal
+                    if not isinstance(goal_list, list):
+                        goal_list = [goal_list]
+                except:
+                    goal_list = [goal] if goal else ["leads"]
+            
+            input_data = CognitiveFrictionInput(
+                raw_text=raw_text or "",
+                platform=platform or "landing_page",
+                goal=goal_list,
+                audience=audience or "cold",
+                language=language or "en",
+                meta={}
+            )
+            
+            # Handle image if provided (multipart/form-data)
+            image_base64_form = None
+            image_mime_form = None
+            image_score_value = None
+            if image:
+                await image.seek(0)
+                image_data = await image.read()
+                image_base64_form = base64.b64encode(image_data).decode('utf-8')
+                image_mime_form = image.content_type or "image/png"
+                
+                # Compute image score for visual-only analysis
+                if len(image_data) > 0:
+                    image_score_value = compute_image_score_from_bytes(image_data)
+                    print(f"[/api/brain/cognitive-friction] Image score from form: {image_score_value}")
+                
+                print(f"[/api/brain/cognitive-friction] Image received from form: {image.filename}, type: {image_mime_form}, size: {len(image_data)} bytes")
+            
+            # Use form image if available, otherwise use JSON image
+            image_base64 = image_base64_form if image_base64_form else image_base64
+            image_mime = image_mime_form if image_mime_form else image_mime
+        
+        # Validate: at least one of text or image must be provided
+        has_text = input_data.raw_text and input_data.raw_text.strip()
+        has_image = image_base64 is not None and image_mime is not None
+        
+        print(f"[/api/brain/cognitive-friction] Validation check:")
+        print(f"  - has_text: {has_text} (raw_text length: {len(input_data.raw_text) if input_data.raw_text else 0})")
+        print(f"  - has_image: {has_image} (image_base64: {image_base64[:50] if image_base64 else None}..., image_mime: {image_mime})")
+        
+        if not has_text and not has_image:
+            error_detail = (
+                "Either text (raw_text) or image must be provided for analysis. "
+                f"Current status: raw_text={'empty' if not input_data.raw_text or not input_data.raw_text.strip() else 'provided'}, "
+                f"image={'not provided' if image_base64 is None else 'provided'}"
+            )
+            print(f"[/api/brain/cognitive-friction] ❌ Validation failed: {error_detail}")
+            raise HTTPException(
+                status_code=400,
+                detail=error_detail
+            )
+        
+        # Call analysis with optional image and image_score
+        print(f"[/api/brain/cognitive-friction] Calling analyze_cognitive_friction...")
+        print(f"  - has_text: {has_text} (length: {len(input_data.raw_text) if input_data.raw_text else 0})")
+        print(f"  - has_image: {has_image} (mime: {image_mime})")
+        print(f"  - image_score: {image_score_value}")
+        
+        try:
+            result = analyze_cognitive_friction(
+                input_data, 
+                image_base64=image_base64, 
+                image_mime=image_mime,
+                image_score=image_score_value
+            )
+            print(f"[/api/brain/cognitive-friction] ✅ Analysis completed successfully")
+            return result
+        except ValueError as ve:
+            print(f"\n❌ ValueError in analyze_cognitive_friction: {ve}")
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(status_code=400, detail=f"Invalid input: {ve}")
+        except Exception as analysis_error:
+            print(f"\n❌ ERROR in analyze_cognitive_friction: {type(analysis_error).__name__}: {analysis_error}")
+            import traceback
+            traceback.print_exc()
+            raise HTTPException(status_code=500, detail=f"Analysis failed: {str(analysis_error)}")
+    except HTTPException:
+        raise
     except Exception as e:
         print(f"\n❌ ERROR in cognitive_friction_endpoint: {type(e).__name__}: {e}")
         import traceback
@@ -542,7 +975,7 @@ async def psychology_analysis_endpoint(input_data: PsychologyAnalysisInput):
 
 @app.post("/api/brain/psychology-analysis-with-image")
 async def psychology_analysis_with_image(
-    text: str = Form(..., description="Ad or landing page text to analyze"),
+    text: Optional[str] = Form(None, description="Ad or landing page text to analyze (optional if image is provided)"),
     image: Optional[UploadFile] = File(
         default=None, description="Optional image file for visual trust analysis"
     ),
@@ -557,10 +990,33 @@ async def psychology_analysis_with_image(
 
         - visual_trust
         - visual_layer
+    
+    Supports visual-only mode: if only image is provided (no text), analysis focuses on visual design.
     """
+    # Detect visual-only mode: image present but no text
+    # Safely handle None text
+    text_present = bool(text and text.strip() if text else False)
+    visual_present = image is not None
+    visual_only_mode = visual_present and not text_present
+    
+    logger = logging.getLogger("brain")
+    logger.warning(
+        "🧠 Psychology analysis mode: text_present=%s, visual_present=%s, visual_only_mode=%s",
+        text_present,
+        visual_present,
+        visual_only_mode,
+    )
+    
+    # Validate: at least one must be provided
+    if not text_present and not visual_present:
+        raise HTTPException(
+            status_code=400,
+            detail="Either text or image (or both) must be provided for analysis."
+        )
+    
     # Step 1: Run text-only psychology analysis using existing engine
     input_data = PsychologyAnalysisInput(
-        raw_text=text,
+        raw_text=text or "",  # Use empty string if None
         platform="visual_ad_or_landing",
         goal=["conversion"],
         audience="general",
@@ -569,7 +1025,7 @@ async def psychology_analysis_with_image(
     )
 
     try:
-        base_result = analyze_psychology(input_data)
+        base_result = analyze_psychology(input_data, visual_only_mode=visual_only_mode)
     except Exception as e:
         import traceback
 
