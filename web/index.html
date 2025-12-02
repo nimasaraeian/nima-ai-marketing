@@ -195,7 +195,13 @@
                     <input id="visualProImage" type="file" accept="image/*" class="form-input" />
                 </div>
 
-                <button type="submit" class="btn btn-primary">Analyze Text + Visual</button>
+                <div style="display: flex; gap: 1rem;">
+                    <button type="submit" class="btn btn-primary">Analyze Text + Visual</button>
+                    <button type="button" class="btn btn-secondary" onclick="testImageUpload(event)">🧪 Test Image Upload</button>
+                </div>
+                <p style="margin-top: 1rem; font-size: 0.875rem; color: #6b7280;">
+                    <strong>Note:</strong> دکمه "Test Image Upload" برای تست موقت است و فقط بررسی می‌کند که تصویر به درستی دریافت می‌شود.
+                </p>
             </form>
         </div>
     </section>

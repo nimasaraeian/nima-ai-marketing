@@ -127,6 +127,41 @@ def root():
     }
 
 
+@app.post("/api/brain/test")
+async def brain_test(
+    content: str = Form(""),
+    image: Optional[UploadFile] = File(None)
+):
+    """
+    Temporary test endpoint for debugging image upload.
+    This endpoint helps verify that images are being received correctly.
+    """
+    print("📩 REQUEST RECEIVED")
+    print("CONTENT:", content)
+    
+    if image is None:
+        print("❌ IMAGE IS NONE")
+        return {"debug": "NO_IMAGE", "image_score": 0}
+    
+    # Reset file pointer to beginning
+    await image.seek(0)
+    data = await image.read()
+    
+    print("📸 IMAGE FILENAME:", image.filename)
+    print("📏 IMAGE SIZE:", len(data), "bytes")
+    print("🔍 FIRST 50 BYTES:", data[:50])
+    print("📋 CONTENT TYPE:", image.content_type)
+    
+    # فقط برای اینکه بدانی تصویر رسید:
+    return {
+        "debug": "IMAGE_RECEIVED",
+        "filename": image.filename,
+        "size": len(data),
+        "content_type": image.content_type,
+        "first_bytes": str(data[:20]) if len(data) >= 20 else str(data)
+    }
+
+
 @app.post("/api/brain", response_model=BrainResponse)
 async def brain_endpoint(request: Request):
     """

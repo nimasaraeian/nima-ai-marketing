@@ -217,6 +217,51 @@ function showResults(result, moduleTitle) {
     modal.style.display = 'block';
 }
 
+// Test endpoint for debugging image upload
+async function testImageUpload(event) {
+    if (event) {
+        event.preventDefault();
+    }
+    
+    const textEl = document.getElementById('visualProText');
+    const imageEl = document.getElementById('visualProImage');
+    
+    const formData = new FormData();
+    formData.append('content', textEl ? textEl.value.trim() : '');
+    
+    if (imageEl && imageEl.files && imageEl.files[0]) {
+        const imageFile = imageEl.files[0];
+        console.log('🧪 TEST: Image file selected:', {
+            name: imageFile.name,
+            size: imageFile.size,
+            type: imageFile.type
+        });
+        formData.append('image', imageFile);
+    } else {
+        console.log('🧪 TEST: No image file selected');
+    }
+    
+    try {
+        console.log('🧪 TEST: Sending to /api/brain/test');
+        const response = await fetch(`${API_BASE_URL}/api/brain/test`, {
+            method: 'POST',
+            body: formData,
+        });
+        
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`HTTP ${response.status}: ${errorText}`);
+        }
+        
+        const result = await response.json();
+        console.log('🧪 TEST RESULT:', result);
+        alert('Test Result:\n' + JSON.stringify(result, null, 2));
+    } catch (error) {
+        console.error('🧪 TEST ERROR:', error);
+        alert('Test Error: ' + error.message);
+    }
+}
+
 // Visual Psychology + Image (Pro) submission
 async function submitVisualPsychologyWithImage(event) {
     event.preventDefault();
