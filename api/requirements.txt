@@ -5,6 +5,7 @@ pydantic>=2.0.0
 
 # Environment and configuration
 python-dotenv>=1.0.0
+python-multipart>=0.0.9
 
 # OpenAI API client
 openai>=1.0.0
