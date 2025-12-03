@@ -1,2 +1,2 @@
 -r api/requirements.txt
-
+tensorflow-cpu==2.12.0
