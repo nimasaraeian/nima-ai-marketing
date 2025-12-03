@@ -9,8 +9,9 @@
 /**
  * @typedef {Object} PsychologyAnalysisResult
  * @property {any} ?analysis - Analysis of all 13 pillars (null if input invalid)
- * @property {any} overall - Overall summary and recommendations
- * @property {string} human_readable_report - Human-readable psychology report
+ * @property {any} ?overall - Overall summary and recommendations
+ * @property {string} ?human_readable_report - Human-readable psychology report
+ * @property {any} ?advanced_view - Advanced 13-dimension psychological profile aligned with the dashboard.
  */
 
 /**
@@ -29,12 +30,14 @@
  * @property {string[]} ?recommendedQuickWins - Actionable quick fixes
  * @property {string[]} ?recommendedDeepChanges - Deeper structural changes
  * @property {string} explanationSummary - 3-6 sentences, plain language summary of the analysis
+ * @property {any} psychology_dashboard - 13-dimension psychology dashboard for the analyzed landing page
+ * @property {any} ?psychology - Full psychology analysis payload including advanced view.
  */
 
 /**
  * @typedef {Object} CognitiveFrictionInput
- * @property {string} raw_text - The content/post/copy to analyze
- * @property {string} platform - Platform type: landing_page, instagram, linkedin, email, etc.
+ * @property {string} ?raw_text - The content/post/copy to analyze (empty string allowed if image is provided)
+ * @property {string} platform - Platform type for analysis
  * @property {string[]} goal - Goals: clicks, leads, sales, engagement, etc.
  * @property {string} audience - Audience type: cold, warm, retargeting, etc.
  * @property {string} ?language - Language code: en, tr, fa, etc.

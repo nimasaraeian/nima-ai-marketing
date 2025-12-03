@@ -24,12 +24,16 @@ API Endpoint: POST /api/brain/psychology-analysis
 """
 
 import json
+import logging
 import os
-from typing import List, Optional, Dict, Any
-from pydantic import BaseModel, Field
+import time
+from typing import List, Optional, Dict, Any, Literal
+from pydantic import BaseModel, Field, ValidationError
 from dotenv import load_dotenv
 from pathlib import Path
 from openai import OpenAI
+
+from json_utils import safe_parse_json
 
 # Load environment variables
 project_root = Path(__file__).parent.parent
@@ -41,6 +45,7 @@ else:
 
 # Initialize OpenAI client lazily
 _client = None
+logger = logging.getLogger("psychology_engine")
 
 def get_client():
     """Get or create OpenAI client (lazy initialization)"""
@@ -4413,18 +4418,386 @@ class IdentityAlignmentAnalysis(PillarAnalysis):
     identity_rewrite: str = Field(..., description="Version aligned with user identity")
 
 
+ADVANCED_VIEW_SYSTEM_PROMPT = """
+You are a senior behavioral psychologist and conversion strategist.
+You analyze landing page copy and produce a 13-dimension psychological profile
+for how this page will be perceived by the ideal target visitor.
+
+Return STRICT JSON with the following schema (all numeric values 0-100):
+{
+  "personality_activation": {
+    "openness": 0,
+    "conscientiousness": 0,
+    "extraversion": 0,
+    "agreeableness": 0,
+    "neuroticism": 0,
+    "label": "",
+    "summary": ""
+  },
+  "cognitive_style": {
+    "style": "",
+    "overload_risk": 0,
+    "ambiguity_aversion": 0,
+    "description": ""
+  },
+  "emotional_response": {
+    "trust": 0,
+    "curiosity": 0,
+    "motivation": 0,
+    "confusion": 0,
+    "anxiety": 0,
+    "narrative": ""
+  },
+  "decision_frame": {
+    "mode": "gain_seeking",
+    "risk_style": "moderate",
+    "tendency": "move_forward",
+    "description": ""
+  },
+  "trust_dynamics": {
+    "visual": 0,
+    "authority": 0,
+    "social_proof": 0,
+    "skepticism": 0,
+    "narrative": ""
+  },
+  "motivation_style": {
+    "primary": "",
+    "secondary": null,
+    "description": ""
+  },
+  "cognitive_load": {
+    "clarity": 0,
+    "overload": 0,
+    "ambiguity": 0,
+    "narrative": ""
+  },
+  "behavioral_prediction": {
+    "convert": 0,
+    "hesitate": 0,
+    "bounce": 0,
+    "postpone": 0,
+    "narrative": ""
+  },
+  "attention_map": {
+    "hotspots": [],
+    "friction_points": [],
+    "narrative": ""
+  },
+  "emotional_triggers": {
+    "activated": [],
+    "missing": [],
+    "narrative": ""
+  },
+  "memory_activation": {
+    "semantic": 0,
+    "emotional": 0,
+    "pattern": 0,
+    "narrative": ""
+  },
+  "risk_perception": {
+    "score": 0,
+    "drivers": [],
+    "narrative": ""
+  },
+  "cta_match": {
+    "fit_score": 0,
+    "clarity": 0,
+    "motivation_alignment": 0,
+    "narrative": ""
+  }
+}
+
+Do not include commentary outside the JSON. 
+""".strip()
+
+
+class PersonalityActivation(BaseModel):
+    openness: int = Field(..., ge=0, le=100)
+    conscientiousness: int = Field(..., ge=0, le=100)
+    extraversion: int = Field(..., ge=0, le=100)
+    agreeableness: int = Field(..., ge=0, le=100)
+    neuroticism: int = Field(..., ge=0, le=100)
+    label: str
+    summary: str
+
+
+class CognitiveStyle(BaseModel):
+    style: str
+    overload_risk: int = Field(..., ge=0, le=100)
+    ambiguity_aversion: int = Field(..., ge=0, le=100)
+    description: str
+
+
+class EmotionalResponse(BaseModel):
+    trust: int = Field(..., ge=0, le=100)
+    curiosity: int = Field(..., ge=0, le=100)
+    motivation: int = Field(..., ge=0, le=100)
+    confusion: int = Field(..., ge=0, le=100)
+    anxiety: int = Field(..., ge=0, le=100)
+    narrative: str
+
+
+class DecisionFrame(BaseModel):
+    mode: Literal["gain_seeking", "loss_avoidance", "mixed"]
+    risk_style: Literal["low", "moderate", "high"]
+    tendency: Literal["move_forward", "wait_and_see", "avoid"]
+    description: str
+
+
+class TrustDynamics(BaseModel):
+    visual: int = Field(..., ge=0, le=100)
+    authority: int = Field(..., ge=0, le=100)
+    social_proof: int = Field(..., ge=0, le=100)
+    skepticism: int = Field(..., ge=0, le=100)
+    narrative: str
+
+
+class MotivationStyle(BaseModel):
+    primary: str
+    secondary: Optional[str] = None
+    description: str
+
+
+class CognitiveLoad(BaseModel):
+    clarity: int = Field(..., ge=0, le=100)
+    overload: int = Field(..., ge=0, le=100)
+    ambiguity: int = Field(..., ge=0, le=100)
+    narrative: str
+
+
+class BehavioralPrediction(BaseModel):
+    convert: int = Field(..., ge=0, le=100)
+    hesitate: int = Field(..., ge=0, le=100)
+    bounce: int = Field(..., ge=0, le=100)
+    postpone: int = Field(..., ge=0, le=100)
+    narrative: str
+
+
+class AttentionMap(BaseModel):
+    hotspots: List[str]
+    friction_points: List[str]
+    narrative: str
+
+
+class EmotionalTriggers(BaseModel):
+    activated: List[str]
+    missing: List[str]
+    narrative: str
+
+
+class MemoryActivation(BaseModel):
+    semantic: int = Field(..., ge=0, le=100)
+    emotional: int = Field(..., ge=0, le=100)
+    pattern: int = Field(..., ge=0, le=100)
+    narrative: str
+
+
+class RiskPerception(BaseModel):
+    score: int = Field(..., ge=0, le=100)
+    drivers: List[str]
+    narrative: str
+
+
+class CTAMatch(BaseModel):
+    fit_score: int = Field(..., ge=0, le=100)
+    clarity: int = Field(..., ge=0, le=100)
+    motivation_alignment: int = Field(..., ge=0, le=100)
+    narrative: str
+
+
+class AdvancedPsychologicalView(BaseModel):
+    personality_activation: PersonalityActivation
+    cognitive_style: CognitiveStyle
+    emotional_response: EmotionalResponse
+    decision_frame: DecisionFrame
+    trust_dynamics: TrustDynamics
+    motivation_style: MotivationStyle
+    cognitive_load: CognitiveLoad
+    behavioral_prediction: BehavioralPrediction
+    attention_map: AttentionMap
+    emotional_triggers: EmotionalTriggers
+    memory_activation: MemoryActivation
+    risk_perception: RiskPerception
+    cta_match: CTAMatch
+
+
+def build_default_advanced_view() -> AdvancedPsychologicalView:
+    """Return a neutral advanced psychological view used as fallback."""
+    zero_narrative = "Advanced view unavailable. Generated neutral baseline."
+    return AdvancedPsychologicalView(
+        personality_activation=PersonalityActivation(
+            openness=50,
+            conscientiousness=50,
+            extraversion=50,
+            agreeableness=50,
+            neuroticism=50,
+            label="Undetermined",
+            summary=zero_narrative,
+        ),
+        cognitive_style=CognitiveStyle(
+            style="mixed",
+            overload_risk=50,
+            ambiguity_aversion=50,
+            description=zero_narrative,
+        ),
+        emotional_response=EmotionalResponse(
+            trust=50,
+            curiosity=50,
+            motivation=50,
+            confusion=50,
+            anxiety=50,
+            narrative=zero_narrative,
+        ),
+        decision_frame=DecisionFrame(
+            mode="mixed",
+            risk_style="moderate",
+            tendency="wait_and_see",
+            description=zero_narrative,
+        ),
+        trust_dynamics=TrustDynamics(
+            visual=50,
+            authority=50,
+            social_proof=50,
+            skepticism=50,
+            narrative=zero_narrative,
+        ),
+        motivation_style=MotivationStyle(
+            primary="Neutral",
+            secondary=None,
+            description=zero_narrative,
+        ),
+        cognitive_load=CognitiveLoad(
+            clarity=50,
+            overload=50,
+            ambiguity=50,
+            narrative=zero_narrative,
+        ),
+        behavioral_prediction=BehavioralPrediction(
+            convert=25,
+            hesitate=25,
+            bounce=25,
+            postpone=25,
+            narrative=zero_narrative,
+        ),
+        attention_map=AttentionMap(
+            hotspots=[],
+            friction_points=[],
+            narrative=zero_narrative,
+        ),
+        emotional_triggers=EmotionalTriggers(
+            activated=[],
+            missing=[],
+            narrative=zero_narrative,
+        ),
+        memory_activation=MemoryActivation(
+            semantic=50,
+            emotional=50,
+            pattern=50,
+            narrative=zero_narrative,
+        ),
+        risk_perception=RiskPerception(
+            score=50,
+            drivers=[],
+            narrative=zero_narrative,
+        ),
+        cta_match=CTAMatch(
+            fit_score=50,
+            clarity=50,
+            motivation_alignment=50,
+            narrative=zero_narrative,
+        ),
+    )
+
+
 class PsychologyAnalysisResult(BaseModel):
     """Complete psychology analysis result"""
-    analysis: Optional[Dict[str, Any]] = Field(None, description="Analysis of all 13 pillars (null if input invalid)")
-    overall: Dict[str, Any] = Field(..., description="Overall summary and recommendations")
-    human_readable_report: str = Field(..., description="Human-readable psychology report")
+    analysis: Optional[Dict[str, Any]] = Field(
+        None, description="Analysis of all 13 pillars (null if input invalid)"
+    )
+    overall: Dict[str, Any] = Field(
+        default_factory=dict, description="Overall summary and recommendations"
+    )
+    human_readable_report: str = Field(
+        default="", description="Human-readable psychology report"
+    )
+    advanced_view: Optional[AdvancedPsychologicalView] = Field(
+        default=None,
+        description="Advanced 13-dimension psychological profile aligned with the dashboard.",
+    )
+
+
+def analyze_advanced_psychology(
+    raw_text: str,
+    *,
+    platform: Optional[str] = None,
+    goal: Optional[List[str]] = None,
+    audience: Optional[str] = None,
+    language: Optional[str] = None,
+) -> AdvancedPsychologicalView:
+    """
+    Generate the advanced psychological view for the provided text using OpenAI.
+    """
+    if not raw_text or not raw_text.strip():
+        logger.warning("[advanced_view] Empty raw text provided; returning fallback view.")
+        return build_default_advanced_view()
+
+    client = get_client()
+    context_lines = []
+    if platform:
+        context_lines.append(f"- Platform: {platform}")
+    if goal:
+        context_lines.append(f"- Goal: {', '.join(goal)}")
+    if audience:
+        context_lines.append(f"- Audience: {audience}")
+    if language:
+        context_lines.append(f"- Language: {language}")
+
+    context_block = "\n".join(context_lines)
+    user_prompt = (
+        "Analyze the following landing page copy and return the full 13-dimension profile.\n\n"
+        f"{context_block}\n\n"
+        f"Landing page copy:\n\"\"\"{raw_text.strip()}\"\"\""
+    ).strip()
+
+    start_time = time.perf_counter()
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[
+                {"role": "system", "content": ADVANCED_VIEW_SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=0.25,
+            response_format={"type": "json_object"},
+        )
+        raw_content = response.choices[0].message.content
+        payload = safe_parse_json(raw_content, context="advanced psychological view")
+        view = AdvancedPsychologicalView(**payload)
+        return view
+    except (json.JSONDecodeError, ValidationError, ValueError) as parsing_error:
+        logger.warning(
+            "[advanced_view] Failed to parse response; returning fallback. Error: %s",
+            parsing_error,
+        )
+        return build_default_advanced_view()
+    except Exception as exc:
+        logger.error(
+            "[advanced_view] Unexpected error; returning fallback. Error: %s",
+            exc,
+            exc_info=True,
+        )
+        return build_default_advanced_view()
+    finally:
+        elapsed = time.perf_counter() - start_time
+        logger.info("[advanced_view] Analysis completed in %.2fs", elapsed)
 
 
 # ====================================================
 # MAIN ANALYSIS FUNCTION
 # ====================================================
 
-def analyze_psychology(input_data: PsychologyAnalysisInput) -> PsychologyAnalysisResult:
+def analyze_psychology(input_data: PsychologyAnalysisInput, visual_only_mode: bool = False) -> PsychologyAnalysisResult:
     """
     Analyze text using all 13 psychological pillars.
     
@@ -4438,6 +4811,7 @@ def analyze_psychology(input_data: PsychologyAnalysisInput) -> PsychologyAnalysi
     
     Args:
         input_data: PsychologyAnalysisInput with raw_text, platform, goal, audience, language, meta
+        visual_only_mode: If True, skip empty text validation (for image-only analysis)
     
     Returns:
         PsychologyAnalysisResult with all 13 pillar analyses and overall summary
@@ -4447,22 +4821,41 @@ def analyze_psychology(input_data: PsychologyAnalysisInput) -> PsychologyAnalysi
         Exception: For other API or parsing errors
     """
     # Input validation - Edge Case 1: Empty or too short
+    # BUT: Skip this check if we're in visual-only mode (image provided, no text)
     text = input_data.raw_text.strip()
-    if not text or len(text) < 10:
-        return _create_invalid_input_result(input_data, "input_too_short")
-    
-    # Check if it's just a single word or very short fragment
-    words = text.split()
-    if len(words) <= 2:
-        return _create_invalid_input_result(input_data, "input_too_short")
+    if not visual_only_mode:
+        # Only validate text length if NOT in visual-only mode
+        if not text or len(text) < 10:
+            return _create_invalid_input_result(input_data, "input_too_short")
+        
+        # Check if it's just a single word or very short fragment
+        words = text.split()
+        if len(words) <= 2:
+            return _create_invalid_input_result(input_data, "input_too_short")
+    else:
+        # In visual-only mode, use a placeholder text that indicates visual analysis
+        if not text:
+            text = "[VISUAL_ONLY_MODE] Analyzing landing page visual design, layout, hierarchy, CTA visibility, and trust signals from the provided image."
     
     client = get_client()
     
     # Build user message
+    # In visual-only mode, add special instructions
+    visual_mode_context = ""
+    if visual_only_mode:
+        visual_mode_context = (
+            "\n\n[VISUAL_ONLY_MODE]\n"
+            "The user did NOT provide raw text. They have submitted a screenshot/visual of a landing page.\n"
+            "- DO NOT say that 'no content was provided' or that 'the page has no information'.\n"
+            "- Assume the landing page DOES have real content, but you only see its visual layout.\n"
+            "- Focus your analysis on visual psychology: layout, hierarchy, CTA visibility, trust signals, clarity, and emotional impact.\n"
+            "- Base your scores on visual effectiveness, not on 'missing text'.\n"
+        )
+    
     user_message = f"""Analyze the following content using all 13 psychological pillars:
 
 CONTENT:
-{input_data.raw_text}
+{text}
 
 CONTEXT:
 - Platform: {input_data.platform}
@@ -4494,7 +4887,7 @@ CRITICAL REWRITE SAFETY RULES (OVERRIDES ALL PREVIOUS INSTRUCTIONS):
 
 Remember: Never skip any pillar. Always provide scores, explanations, and rewrites.
 Follow all operational rules for edge cases, input validation, and ethical guidelines.
-VIOLATION OF REWRITE SAFETY RULES IS UNACCEPTABLE."""
+VIOLATION OF REWRITE SAFETY RULES IS UNACCEPTABLE.{visual_mode_context}"""
     
     # Call OpenAI API
     try:
@@ -4624,6 +5017,21 @@ VIOLATION OF REWRITE SAFETY RULES IS UNACCEPTABLE."""
             if "human_readable_report" not in data or len(data.get("human_readable_report", "")) < 100:
                 data["human_readable_report"] = _generate_human_readable_report(data, input_data.raw_text)
             
+            try:
+                advanced_view = analyze_advanced_psychology(
+                    text,
+                    platform=input_data.platform,
+                    goal=input_data.goal,
+                    audience=input_data.audience,
+                    language=input_data.language,
+                )
+            except Exception as advanced_error:
+                logger.warning(
+                    "[advanced_view] Generation failed inside psychology analysis: %s",
+                    advanced_error,
+                )
+                advanced_view = build_default_advanced_view()
+            data["advanced_view"] = advanced_view.model_dump()
             return PsychologyAnalysisResult(**data)
             
         except (json.JSONDecodeError, ValueError) as e:
@@ -5195,6 +5603,8 @@ Minimum requirements:
 - At least 3-4 sentences
 - Complete thoughts or messages
 - Marketing, sales, or decision-oriented content preferred"""
+        ,
+        advanced_view=build_default_advanced_view(),
     )
 
 
@@ -5346,7 +5756,8 @@ Please check:
     return PsychologyAnalysisResult(
         analysis=fallback_analysis,
         overall=fallback_overall,
-        human_readable_report=fallback_report
+        human_readable_report=fallback_report,
+        advanced_view=build_default_advanced_view(),
     )
 
 

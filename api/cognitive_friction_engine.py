@@ -13,12 +13,17 @@ API Endpoint: POST /api/brain/cognitive-friction (in main.py)
 """
 
 import json
+import logging
 import os
-from typing import List, Optional, Dict, Any, Literal
-from pydantic import BaseModel, Field
+from copy import deepcopy
+from typing import List, Optional, Dict, Any, Literal, Tuple
+from pydantic import BaseModel, Field, ValidationError
 from dotenv import load_dotenv
 from pathlib import Path
 from openai import OpenAI
+
+from models.psychology_dashboard import PsychologyDashboard
+from psychology_engine import PsychologyAnalysisResult
 
 # Load environment variables
 project_root = Path(__file__).parent.parent
@@ -30,6 +35,7 @@ else:
 
 # Initialize OpenAI client lazily
 _client = None
+logger = logging.getLogger("cognitive_friction")
 
 def get_client():
     """Get or create OpenAI client (lazy initialization)"""
@@ -369,6 +375,228 @@ Important rules:
 - DO NOT add comments, explanations, or extra keys outside this schema.
 - Use English in all outputs.
 
+MANDATORY coverage (map business wording to schema fields):
+- "Friction analysis" = `keyDecisionBlockers` plus supporting factor lists (`emotionalResistanceFactors`, `cognitiveOverloadFactors`, `trustBreakpoints`, `motivationMisalignments`). Provide at least 3 blockers.
+- "Dimensions" = the 13-section `psychology_dashboard`. Populate every section with numbers and explanations.
+- "Analysis summary" = `explanationSummary` (3–6 sentences, plain language, decision-focused).
+- "Quick fixes" = `recommendedQuickWins` (minimum 3). Also include `recommendedDeepChanges` for deeper guidance.
+
+====================================================
+PSYCHOLOGY DASHBOARD EXTENSION (MUST RETURN)
+====================================================
+
+IN ADDITION to the fields above, you MUST also include a nested object named
+`psychology_dashboard` with the following 13 keys and structure:
+
+{
+  "psychology_dashboard": {
+    "personality_activation": {
+      "O": 0-100, "C": 0-100, "E": 0-100, "A": 0-100, "N": 0-100,
+      "dominant_profile": "e.g. Visionary Achiever",
+      "explanation": "1-2 sentences"
+    },
+    "cognitive_style": {
+      "type": "analytical|intuitive|overloaded|mixed",
+      "overload_risk": 0-100,
+      "ambiguity_aversion": 0-100,
+      "explanation": "1-2 sentences"
+    },
+    "emotional_response": {
+      "curiosity": 0-100, "excitement": 0-100, "motivation": 0-100,
+      "anxiety": 0-100, "confusion": 0-100, "trust": 0-100
+    },
+    "decision_frame": {
+      "mode": "gain_seeking|loss_avoidance|neutral",
+      "risk_style": "risk_averse|risk_taking|moderate",
+      "decision_tendency": "move_forward|hesitate|postpone|bounce",
+      "explanation": "1-2 sentences"
+    },
+    "trust_dynamics": {
+      "visual_trust": 0-100,
+      "institutional_trust": 0-100,
+      "social_trust": 0-100,
+      "skepticism": 0-100
+    },
+    "motivation_style": {
+      "primary": "e.g. Achievement",
+      "secondary": "optional secondary driver",
+      "explanation": "1-2 sentences"
+    },
+    "cognitive_load": {
+      "clarity_score": 0-100,
+      "overload_score": 0-100,
+      "ambiguity_score": 0-100
+    },
+    "behavioral_prediction": {
+      "convert": 0-100,
+      "hesitate": 0-100,
+      "bounce": 0-100,
+      "postpone": 0-100,
+      "summary": "1-2 sentences"
+    },
+    "attention_map": {
+      "hotspots": ["list of sections attracting attention"],
+      "friction_points": ["list of friction areas"]
+    },
+    "emotional_triggers": {
+      "activated": ["emotions triggered"],
+      "missing": ["important emotions missing"]
+    },
+    "memory_activation": {
+      "semantic": 0-100,
+      "emotional": 0-100,
+      "pattern": 0-100
+    },
+    "risk_perception": {
+      "risk_level": 0-100,
+      "uncertainty_points": ["list of uncertainties"]
+    },
+    "cta_match": {
+      "fit_score": 0-100,
+      "clarity": 0-100,
+      "motivation_alignment": 0-100,
+      "action_probability": 0-100
+    }
+  }
+}
+
+If any dimension cannot be assessed, provide your best estimate and explain in
+the related explanation/summary. Never omit the psychology_dashboard object.
+
+====================================================
+JSON EXAMPLE (FOLLOW EXACTLY)
+====================================================
+Return JSON in this exact structure (values are illustrative; structure is mandatory):
+
+{
+  "frictionScore": 64.2,
+  "trustScore": 52.1,
+  "emotionalClarityScore": 48.0,
+  "motivationMatchScore": 57.0,
+  "decisionProbability": 0.36,
+  "conversionLiftEstimate": 22.0,
+  "keyDecisionBlockers": [
+    "Value proposition is buried below the fold.",
+    "No proof or testimonials appear near the CTA.",
+    "CTA requires a full sales call with no preview of value."
+  ],
+  "emotionalResistanceFactors": [
+    "Messaging triggers skepticism due to vague promises.",
+    "Reader anxiety rises because pricing is hidden."
+  ],
+  "cognitiveOverloadFactors": [
+    "Paragraphs combine multiple ideas without hierarchy."
+  ],
+  "trustBreakpoints": [
+    "Logos are low-contrast and easy to miss."
+  ],
+  "motivationMisalignments": [
+    "CTA asks for a commitment before demonstrating outcomes."
+  ],
+  "recommendedQuickWins": [
+    "Surface the core benefit in the hero area.",
+    "Add two short testimonials near the CTA.",
+    "Clarify what happens immediately after clicking the CTA."
+  ],
+  "recommendedDeepChanges": [
+    "Rewrite the flow to introduce proof before the pitch.",
+    "Split dense paragraphs into scannable bullet sections."
+  ],
+  "explanationSummary": "Friction stays elevated because the promise arrives late, proof is hidden, and the CTA feels risky. Readers feel curious about the AI audit but lack evidence that it works. Without social proof or next-step clarity, most prospects will hesitate or postpone booking a call.",
+  "psychology_dashboard": {
+    "personality_activation": {
+      "O": 58,
+      "C": 61,
+      "E": 42,
+      "A": 55,
+      "N": 47,
+      "dominant_profile": "Skeptical Evaluator",
+      "explanation": "Needs concrete proof before investing attention."
+    },
+    "cognitive_style": {
+      "type": "analytical",
+      "overload_risk": 62,
+      "ambiguity_aversion": 71,
+      "explanation": "Will pause when claims lack evidence."
+    },
+    "emotional_response": {
+      "curiosity": 64,
+      "excitement": 38,
+      "motivation": 52,
+      "anxiety": 49,
+      "confusion": 34,
+      "trust": 46
+    },
+    "decision_frame": {
+      "mode": "loss_avoidance",
+      "risk_style": "risk_averse",
+      "decision_tendency": "hesitate",
+      "explanation": "Needs reassurance that the audit is low-risk."
+    },
+    "trust_dynamics": {
+      "visual_trust": 55,
+      "institutional_trust": 48,
+      "social_trust": 41,
+      "skepticism": 52
+    },
+    "motivation_style": {
+      "primary": "Achievement",
+      "secondary": "Security",
+      "explanation": "Wants measurable wins without risking budget."
+    },
+    "cognitive_load": {
+      "clarity_score": 54,
+      "overload_score": 63,
+      "ambiguity_score": 58
+    },
+    "behavioral_prediction": {
+      "convert": 28,
+      "hesitate": 46,
+      "bounce": 14,
+      "postpone": 12,
+      "summary": "Most will pause until proof and next steps are clearer."
+    },
+    "attention_map": {
+      "hotspots": [
+        "Hero headline",
+        "Primary CTA banner"
+      ],
+      "friction_points": [
+        "Dense paragraph under the hero",
+        "CTA lacks preview of the deliverable"
+      ]
+    },
+    "emotional_triggers": {
+      "activated": [
+        "Curiosity",
+        "Growth"
+      ],
+      "missing": [
+        "Safety",
+        "Belonging"
+      ]
+    },
+    "memory_activation": {
+      "semantic": 59,
+      "emotional": 44,
+      "pattern": 41
+    },
+    "risk_perception": {
+      "risk_level": 66,
+      "uncertainty_points": [
+        "No timeline or scope for the audit",
+        "Pricing is not disclosed"
+      ]
+    },
+    "cta_match": {
+      "fit_score": 48,
+      "clarity": 52,
+      "motivation_alignment": 44,
+      "action_probability": 38
+    }
+  }
+}
+
 ====================================================
 HOW TO THINK ABOUT THE INPUT
 ====================================================
@@ -504,6 +732,248 @@ Expected Analysis Pattern:
 Use these patterns as guidance, but always analyze the actual content you receive rather than applying these scores mechanically.
 """
 
+OUTPUT_REQUIREMENTS_MESSAGE = (
+    "OUTPUT REQUIREMENTS:\n"
+    "- Return ONLY valid JSON that follows the CognitiveFrictionResult schema described in the system prompt.\n"
+    "- Always include friction analysis fields (keyDecisionBlockers plus the supporting factor lists).\n"
+    "- Always include an analysis summary via explanationSummary (3-6 sentences).\n"
+    "- Always include at least three recommendedQuickWins plus recommendedDeepChanges.\n"
+    "- Always include the psychology_dashboard with all 13 sections populated (this is the 'dimensions' requirement).\n"
+    "- Never include markdown or text outside the JSON object."
+)
+
+FIX_JSON_RETRY_MESSAGE = (
+    "Fix JSON format. The previous response was not valid JSON. Return ONLY valid JSON that follows the CognitiveFrictionResult "
+    "schema, including friction analysis lists, analysis summary, quick fixes, and the psychology_dashboard with all 13 sections."
+)
+
+PSYCHOLOGY_DASHBOARD_KEYS = [
+    "personality_activation",
+    "cognitive_style",
+    "emotional_response",
+    "decision_frame",
+    "trust_dynamics",
+    "motivation_style",
+    "cognitive_load",
+    "behavioral_prediction",
+    "attention_map",
+    "emotional_triggers",
+    "memory_activation",
+    "risk_perception",
+    "cta_match",
+]
+
+TOP_LEVEL_DEFAULTS: Dict[str, Any] = {
+    "frictionScore": 50.0,
+    "trustScore": 50.0,
+    "emotionalClarityScore": 50.0,
+    "motivationMatchScore": 50.0,
+    "decisionProbability": 0.5,
+    "conversionLiftEstimate": 0.0,
+    "keyDecisionBlockers": [],
+    "emotionalResistanceFactors": [],
+    "cognitiveOverloadFactors": [],
+    "trustBreakpoints": [],
+    "motivationMisalignments": [],
+    "recommendedQuickWins": [],
+    "recommendedDeepChanges": [],
+    "explanationSummary": "Analysis completed.",
+}
+
+STRING_LIST_FIELDS = [
+    "keyDecisionBlockers",
+    "emotionalResistanceFactors",
+    "cognitiveOverloadFactors",
+    "trustBreakpoints",
+    "motivationMisalignments",
+    "recommendedQuickWins",
+    "recommendedDeepChanges",
+]
+
+
+class InvalidAIResponseError(Exception):
+    """Raised when the AI output cannot be coerced into the expected schema."""
+
+    def __init__(self, raw_output: str):
+        super().__init__("AI returned invalid structure")
+        self.raw_output = raw_output
+
+
+def _clamp_int(value: float) -> int:
+    """Clamp a numeric value into 0-100 and convert to int."""
+    return int(max(0, min(100, round(value))))
+
+
+def build_psychology_dashboard_stub(
+    friction_score: float,
+    trust_score: float,
+    summary: str,
+    hotspots: Optional[List[str]] = None,
+    friction_points: Optional[List[str]] = None,
+) -> PsychologyDashboard:
+    """
+    Build a structured psychology dashboard using heuristics when the model output
+    is unavailable (fallback) or when we need a deterministic visual-only result.
+    """
+
+    hotspots = hotspots or ["Hero headline", "Primary CTA"]
+    friction_points = friction_points or ["Trust signals", "Proof placement"]
+
+    dominant_profile = "Evidence-Seeking Thinker" if trust_score < 60 else "Decisive Optimizer"
+    cognitive_style_type = "analytical" if friction_score >= 55 else "intuitive"
+
+    curiosity = _clamp_int(70 - friction_score / 3)
+    excitement = _clamp_int(trust_score / 1.5)
+    motivation = _clamp_int(65 - friction_score / 4 + trust_score / 5)
+    anxiety = _clamp_int(30 + friction_score / 2 - trust_score / 5)
+    confusion = _clamp_int(friction_score / 1.6)
+    trust_emotion = _clamp_int(trust_score)
+
+    convert = _clamp_int((trust_score + (100 - friction_score)) / 2)
+    hesitate = _clamp_int((friction_score + (100 - trust_score)) / 2)
+    bounce = _clamp_int(max(15, friction_score - trust_score / 2))
+    postpone = _clamp_int(max(0, 100 - convert - bounce))
+
+    risk_level = _clamp_int((100 - trust_score) * 0.6 + friction_score * 0.6)
+
+    return PsychologyDashboard(
+        personality_activation={
+            "O": _clamp_int(60 - friction_score / 5),
+            "C": _clamp_int(55 + trust_score / 6),
+            "E": _clamp_int(50 - friction_score / 4 + trust_score / 8),
+            "A": _clamp_int(55),
+            "N": _clamp_int(45 + friction_score / 5),
+            "dominant_profile": dominant_profile,
+            "explanation": "Fallback profile derived from friction/trust trends.",
+        },
+        cognitive_style={
+            "type": cognitive_style_type,
+            "overload_risk": _clamp_int(friction_score),
+            "ambiguity_aversion": _clamp_int(60 + friction_score / 4),
+            "explanation": "Generated heuristically to preserve dashboard completeness.",
+        },
+        emotional_response={
+            "curiosity": curiosity,
+            "excitement": excitement,
+            "motivation": motivation,
+            "anxiety": anxiety,
+            "confusion": confusion,
+            "trust": trust_emotion,
+        },
+        decision_frame={
+            "mode": "loss_avoidance" if trust_score < 55 else "gain_seeking",
+            "risk_style": "risk_averse" if trust_score < 55 else "moderate",
+            "decision_tendency": "hesitate" if friction_score >= 50 else "move_forward",
+            "explanation": summary,
+        },
+        trust_dynamics={
+            "visual_trust": _clamp_int(trust_score - 5),
+            "institutional_trust": _clamp_int(trust_score),
+            "social_trust": _clamp_int(trust_score - 10),
+            "skepticism": _clamp_int(40 + friction_score / 2),
+        },
+        motivation_style={
+            "primary": "Achievement" if trust_score >= 55 else "Security",
+            "secondary": "Security" if trust_score >= 55 else "Clarity",
+            "explanation": "Auto-generated motivation narrative for fallback reporting.",
+        },
+        cognitive_load={
+            "clarity_score": _clamp_int(100 - friction_score),
+            "overload_score": _clamp_int(friction_score),
+            "ambiguity_score": _clamp_int(50 + friction_score / 3),
+        },
+        behavioral_prediction={
+            "convert": convert,
+            "hesitate": hesitate,
+            "bounce": bounce,
+            "postpone": postpone,
+            "summary": summary,
+        },
+        attention_map={
+            "hotspots": hotspots,
+            "friction_points": friction_points,
+        },
+        emotional_triggers={
+            "activated": ["Curiosity", "Growth"],
+            "missing": ["Safety"] if trust_score < 60 else ["Urgency"],
+        },
+        memory_activation={
+            "semantic": _clamp_int(55 + trust_score / 6),
+            "emotional": _clamp_int(excitement),
+            "pattern": _clamp_int(45 + (100 - friction_score) / 5),
+        },
+        risk_perception={
+            "risk_level": risk_level,
+            "uncertainty_points": [
+                "Fallback dashboard generated due to upstream response issues."
+            ],
+        },
+        cta_match={
+            "fit_score": _clamp_int((100 - friction_score + trust_score) / 2),
+            "clarity": _clamp_int(60 - friction_score / 3 + trust_score / 5),
+            "motivation_alignment": _clamp_int(55 + motivation / 5),
+            "action_probability": convert,
+        },
+    )
+
+
+def _extract_json_payload(raw_content: str, context: str) -> Dict[str, Any]:
+    """Extract and parse JSON from a raw model response string."""
+    if not raw_content:
+        raise ValueError(f"{context} returned an empty response.")
+
+    trimmed = raw_content.strip()
+    if trimmed.startswith("```json"):
+        trimmed = trimmed[7:]
+        closing = trimmed.find("```")
+        if closing != -1:
+            trimmed = trimmed[:closing].strip()
+    elif trimmed.startswith("```"):
+        trimmed = trimmed[3:]
+        closing = trimmed.find("```")
+        if closing != -1:
+            trimmed = trimmed[:closing].strip()
+
+    if not trimmed:
+        raise ValueError(f"{context} response became empty after trimming.")
+
+    if trimmed[0] not in "{[":
+        preview = trimmed[:80]
+        raise ValueError(f"{context} is not valid JSON. Preview: {preview!r}")
+
+    if trimmed[0] == "{":
+        brace_count = 0
+        end_index = None
+        for idx, char in enumerate(trimmed):
+            if char == "{":
+                brace_count += 1
+            elif char == "}":
+                brace_count -= 1
+                if brace_count == 0:
+                    end_index = idx + 1
+                    break
+        if end_index is not None:
+            trimmed = trimmed[:end_index]
+
+    return json.loads(trimmed)
+
+
+def _validate_psychology_dashboard_structure(payload: Dict[str, Any]) -> None:
+    """Ensure the psychology_dashboard dictionary includes all 13 required sections."""
+    dashboard = payload.get("psychology_dashboard")
+    if not isinstance(dashboard, dict):
+        raise ValueError("psychology_dashboard missing or not an object.")
+
+    missing = [key for key in PSYCHOLOGY_DASHBOARD_KEYS if key not in dashboard]
+    if missing:
+        raise ValueError(
+            f"psychology_dashboard missing sections: {', '.join(sorted(missing))}"
+        )
+
+    for key in PSYCHOLOGY_DASHBOARD_KEYS:
+        if dashboard[key] in (None, "", []):
+            raise ValueError(f"psychology_dashboard.{key} must be populated.")
+
 
 # ====================================================
 # INPUT/OUTPUT SCHEMAS
@@ -543,7 +1013,397 @@ class CognitiveFrictionResult(BaseModel):
     recommendedQuickWins: List[str] = Field(default_factory=list, description="Actionable quick fixes")
     recommendedDeepChanges: List[str] = Field(default_factory=list, description="Deeper structural changes")
     explanationSummary: str = Field(..., description="3-6 sentences, plain language summary of the analysis")
+    psychology_dashboard: PsychologyDashboard = Field(
+        ...,
+        description="13-dimension psychology dashboard for the analyzed landing page",
+    )
+    psychology: Optional[PsychologyAnalysisResult] = Field(
+        default=None,
+        description="Full psychology analysis payload including advanced view.",
+    )
 
+
+def _default_psychology_dashboard() -> Dict[str, Any]:
+    """Return a zeroed-out psychology dashboard placeholder."""
+    return {
+        "personality_activation": {
+            "O": 0,
+            "C": 0,
+            "E": 0,
+            "A": 0,
+            "N": 0,
+            "dominant_profile": "Undetermined",
+            "explanation": "",
+        },
+        "cognitive_style": {
+            "type": "analytical",
+            "overload_risk": 0,
+            "ambiguity_aversion": 0,
+            "explanation": "",
+        },
+        "emotional_response": {
+            "curiosity": 0,
+            "excitement": 0,
+            "motivation": 0,
+            "anxiety": 0,
+            "confusion": 0,
+            "trust": 0,
+        },
+        "decision_frame": {
+            "mode": "neutral",
+            "risk_style": "moderate",
+            "decision_tendency": "hesitate",
+            "explanation": "",
+        },
+        "trust_dynamics": {
+            "visual_trust": 0,
+            "institutional_trust": 0,
+            "social_trust": 0,
+            "skepticism": 0,
+        },
+        "motivation_style": {
+            "primary": "Unspecified",
+            "secondary": "",
+            "explanation": "",
+        },
+        "cognitive_load": {
+            "clarity_score": 0,
+            "overload_score": 0,
+            "ambiguity_score": 0,
+        },
+        "behavioral_prediction": {
+            "convert": 0,
+            "hesitate": 0,
+            "bounce": 0,
+            "postpone": 0,
+            "summary": "",
+        },
+        "attention_map": {
+            "hotspots": [],
+            "friction_points": [],
+        },
+        "emotional_triggers": {
+            "activated": [],
+            "missing": [],
+        },
+        "memory_activation": {
+            "semantic": 0,
+            "emotional": 0,
+            "pattern": 0,
+        },
+        "risk_perception": {
+            "risk_level": 0,
+            "uncertainty_points": [],
+        },
+        "cta_match": {
+            "fit_score": 0,
+            "clarity": 0,
+            "motivation_alignment": 0,
+            "action_probability": 0,
+        },
+    }
+
+
+SECTION_ENUM_OPTIONS = {
+    ("cognitive_style", "type"): {"analytical", "intuitive", "overloaded", "mixed"},
+    ("decision_frame", "mode"): {"gain_seeking", "loss_avoidance", "neutral"},
+    ("decision_frame", "risk_style"): {"risk_averse", "risk_taking", "moderate"},
+    ("decision_frame", "decision_tendency"): {
+        "move_forward",
+        "hesitate",
+        "postpone",
+        "bounce",
+    },
+}
+
+
+def _log_validation_warning(message: str) -> None:
+    logger.warning("[validation] %s", message)
+
+
+def _coerce_float(value: Any, field: str, default: float) -> float:
+    if value is None:
+        _log_validation_warning(f"{field} missing; defaulting to {default}.")
+        return default
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            _log_validation_warning(f"{field} empty string; defaulting to {default}.")
+            return default
+        try:
+            return float(stripped)
+        except ValueError:
+            _log_validation_warning(
+                f"{field} received non-numeric string '{value}'; defaulting to {default}."
+            )
+            return default
+    _log_validation_warning(
+        f"{field} received invalid type {type(value).__name__}; defaulting to {default}."
+    )
+    return default
+
+
+def _normalize_numeric(value: Any, field: str, default: float, min_value: float = 0.0, max_value: float = 100.0) -> float:
+    numeric = _coerce_float(value, field, default)
+    if numeric < min_value:
+        _log_validation_warning(
+            f"{field} below minimum ({numeric} < {min_value}); clamping."
+        )
+        numeric = min_value
+    if numeric > max_value:
+        _log_validation_warning(
+            f"{field} above maximum ({numeric} > {max_value}); clamping."
+        )
+        numeric = max_value
+    return numeric
+
+
+def _normalize_probability(value: Any) -> float:
+    prob = _coerce_float(
+        value,
+        "decisionProbability",
+        TOP_LEVEL_DEFAULTS["decisionProbability"],
+    )
+    if prob > 1:
+        _log_validation_warning(
+            f"decisionProbability appears to be percentage ({prob}); scaling to 0-1."
+        )
+        prob = prob / 100.0
+    prob = max(0.0, min(1.0, prob))
+    return round(prob, 4)
+
+
+def _normalize_conversion_lift(value: Any) -> float:
+    lift = _coerce_float(
+        value,
+        "conversionLiftEstimate",
+        TOP_LEVEL_DEFAULTS["conversionLiftEstimate"],
+    )
+    return round(max(-100.0, min(100.0, lift)), 2)
+
+
+def _ensure_string(value: Any, field: str, default: str = "") -> str:
+    if value is None:
+        _log_validation_warning(f"{field} missing; defaulting to '{default}'.")
+        return default
+    if isinstance(value, str):
+        return value
+    _log_validation_warning(
+        f"{field} expected string but received {type(value).__name__}; coercing."
+    )
+    return str(value)
+
+
+def _ensure_string_list(value: Any, field: str) -> List[str]:
+    if value is None:
+        _log_validation_warning(f"{field} missing; defaulting to empty list.")
+        return []
+    if isinstance(value, list):
+        sanitized: List[str] = []
+        for idx, item in enumerate(value):
+            if item is None:
+                continue
+            if not isinstance(item, str):
+                _log_validation_warning(
+                    f"{field}[{idx}] expected string but received {type(item).__name__}; coercing."
+                )
+                sanitized.append(str(item))
+            else:
+                sanitized.append(item)
+        return sanitized
+    if isinstance(value, str):
+        _log_validation_warning(f"{field} provided as string; wrapping in list.")
+        return [value]
+    _log_validation_warning(
+        f"{field} expected list of strings but received {type(value).__name__}; defaulting to empty list."
+    )
+    return []
+
+
+def _normalize_top_level_payload(data: Dict[str, Any]) -> Dict[str, Any]:
+    payload: Dict[str, Any] = {}
+    payload["frictionScore"] = _normalize_numeric(
+        data.get("frictionScore"),
+        "frictionScore",
+        TOP_LEVEL_DEFAULTS["frictionScore"],
+    )
+    payload["trustScore"] = _normalize_numeric(
+        data.get("trustScore"),
+        "trustScore",
+        TOP_LEVEL_DEFAULTS["trustScore"],
+    )
+    payload["emotionalClarityScore"] = _normalize_numeric(
+        data.get("emotionalClarityScore"),
+        "emotionalClarityScore",
+        TOP_LEVEL_DEFAULTS["emotionalClarityScore"],
+    )
+    payload["motivationMatchScore"] = _normalize_numeric(
+        data.get("motivationMatchScore"),
+        "motivationMatchScore",
+        TOP_LEVEL_DEFAULTS["motivationMatchScore"],
+    )
+    payload["decisionProbability"] = _normalize_probability(
+        data.get("decisionProbability")
+    )
+    payload["conversionLiftEstimate"] = _normalize_conversion_lift(
+        data.get("conversionLiftEstimate")
+    )
+
+    for list_field in STRING_LIST_FIELDS:
+        payload[list_field] = _ensure_string_list(data.get(list_field), list_field)
+
+    payload["explanationSummary"] = _ensure_string(
+        data.get("explanationSummary"),
+        "explanationSummary",
+        TOP_LEVEL_DEFAULTS["explanationSummary"],
+    )
+    payload["psychology_dashboard"] = _normalize_psychology_dashboard(
+        data.get("psychology_dashboard")
+    )
+    return payload
+
+
+def _normalize_psychology_dashboard(dashboard: Any) -> Dict[str, Any]:
+    defaults = _default_psychology_dashboard()
+    if not isinstance(dashboard, dict):
+        _log_validation_warning(
+            "psychology_dashboard missing or invalid; inserting placeholder."
+        )
+        return defaults
+
+    normalized: Dict[str, Any] = {}
+    for section, section_defaults in defaults.items():
+        section_data = dashboard.get(section)
+        if not isinstance(section_data, dict):
+            _log_validation_warning(
+                f"psychology_dashboard.{section} missing; inserting placeholder section."
+            )
+            normalized[section] = section_defaults
+            continue
+        normalized[section] = _normalize_dashboard_section(
+            section, section_data, section_defaults
+        )
+    return normalized
+
+
+def _normalize_dashboard_section(
+    section_name: str, section_data: Dict[str, Any], defaults: Dict[str, Any]
+) -> Dict[str, Any]:
+    normalized_section: Dict[str, Any] = {}
+    for field_name, default_value in defaults.items():
+        full_field = f"psychology_dashboard.{section_name}.{field_name}"
+        value = section_data.get(field_name, default_value)
+        if isinstance(default_value, list):
+            normalized_section[field_name] = _ensure_string_list(value, full_field)
+        elif isinstance(default_value, (int, float)):
+            normalized_value = _normalize_numeric(value, full_field, default_value)
+            normalized_section[field_name] = int(round(normalized_value))
+        else:
+            coerced = _ensure_string(value, full_field, default_value)
+            enum_key = (section_name, field_name)
+            if enum_key in SECTION_ENUM_OPTIONS and coerced not in SECTION_ENUM_OPTIONS[enum_key]:
+                _log_validation_warning(
+                    f"{full_field} used invalid option '{coerced}'; defaulting to '{default_value}'."
+                )
+                coerced = default_value
+            normalized_section[field_name] = coerced
+    return normalized_section
+
+
+def _auto_repair_payload(data: Dict[str, Any]) -> Dict[str, Any]:
+    valid_fields = set(CognitiveFrictionResult.model_fields.keys())
+    repaired: Dict[str, Any] = {
+        key: deepcopy(value)
+        for key, value in data.items()
+        if key in valid_fields
+    }
+
+    for key, default in TOP_LEVEL_DEFAULTS.items():
+        if key not in repaired:
+            _log_validation_warning(
+                f"Auto-filling missing field '{key}' during repair."
+            )
+            repaired[key] = deepcopy(default) if isinstance(default, list) else default
+
+    if "psychology_dashboard" not in repaired or not isinstance(
+        repaired["psychology_dashboard"], dict
+    ):
+        _log_validation_warning(
+            "Auto-filling missing psychology_dashboard during repair."
+        )
+        repaired["psychology_dashboard"] = _default_psychology_dashboard()
+    else:
+        repaired["psychology_dashboard"] = _normalize_psychology_dashboard(
+            repaired["psychology_dashboard"]
+        )
+
+    return repaired
+
+
+def _parse_model_response_with_retry(
+    client: OpenAI, model: str, raw_content: str
+) -> Tuple[Dict[str, Any], str]:
+    try:
+        return json.loads(raw_content), raw_content
+    except json.JSONDecodeError as primary_error:
+        _log_validation_warning(
+            f"Initial JSON parsing failed; attempting fix prompt: {primary_error}"
+        )
+
+        retry_messages = [
+            {
+                "role": "system",
+                "content": "You are a JSON repair assistant that outputs strictly valid JSON.",
+            },
+            {
+                "role": "user",
+                "content": f"{FIX_JSON_RETRY_MESSAGE}\n\nBroken JSON:\n{raw_content}",
+            },
+        ]
+        logger.warning("[validation] Retrying JSON repair via fix prompt.")
+        retry_response = client.chat.completions.create(
+            model=model,
+            messages=retry_messages,
+            temperature=0.0,
+            response_format={"type": "json_object"},
+        )
+        fixed_content = retry_response.choices[0].message.content
+        try:
+            return json.loads(fixed_content), fixed_content
+        except json.JSONDecodeError as retry_error:
+            logger.error(
+                "[validation] JSON parsing failed after retry: %s", retry_error
+            )
+            raise InvalidAIResponseError(raw_output=raw_content) from retry_error
+
+
+def validate_cognitive_response(raw_dict: Dict[str, Any]) -> CognitiveFrictionResult:
+    """
+    Validate and coerce the raw dictionary into a CognitiveFrictionResult.
+    """
+    if not isinstance(raw_dict, dict):
+        raise ValueError("AI response must be a JSON object.")
+
+    normalized_payload = _normalize_top_level_payload(deepcopy(raw_dict))
+
+    try:
+        return CognitiveFrictionResult(**normalized_payload)
+    except ValidationError as validation_error:
+        logger.warning(
+            "[validation] Pydantic validation failed; attempting auto-repair: %s",
+            validation_error,
+        )
+        repaired_payload = _auto_repair_payload(normalized_payload)
+        try:
+            return CognitiveFrictionResult(**repaired_payload)
+        except ValidationError as final_error:
+            logger.error(
+                "[validation] Auto-repair failed; response still invalid: %s",
+                final_error,
+            )
+            raise
 
 # ====================================================
 # VISUAL-ONLY ANALYSIS BUILDER
@@ -623,6 +1483,18 @@ def build_visual_only_analysis(
     else:
         summary += "Visual elements were analyzed to assess conversion potential."
     
+    dashboard_summary = (
+        "Visual cues guide initial attention to the hero area, but users slow down when proof and trust markers "
+        "are not clearly visible. Emphasize CTA clarity and ensure supporting evidence is close to the action point."
+    )
+    dashboard = build_psychology_dashboard_stub(
+        friction_score=decision_friction_score,
+        trust_score=trust_score,
+        summary=dashboard_summary,
+        hotspots=["Hero section", "Primary CTA"],
+        friction_points=["Trust badges", "CTA contrast"],
+    )
+
     return CognitiveFrictionResult(
         frictionScore=float(decision_friction_score),
         trustScore=float(trust_score),
@@ -646,6 +1518,7 @@ def build_visual_only_analysis(
             "Improve visual flow to reduce cognitive load and increase clarity.",
         ],
         explanationSummary=summary,
+        psychology_dashboard=dashboard,
     )
 
 
@@ -653,7 +1526,13 @@ def build_visual_only_analysis(
 # MAIN ANALYSIS FUNCTION
 # ====================================================
 
-def analyze_cognitive_friction(input_data: CognitiveFrictionInput, image_base64: Optional[str] = None, image_mime: Optional[str] = None, image_score: Optional[float] = None) -> CognitiveFrictionResult:
+def analyze_cognitive_friction(
+    input_data: CognitiveFrictionInput,
+    image_base64: Optional[str] = None,
+    image_mime: Optional[str] = None,
+    image_score: Optional[float] = None,
+    model_override: Optional[str] = None,
+) -> CognitiveFrictionResult:
     """
     Analyze cognitive friction and decision psychology for given content.
     
@@ -721,7 +1600,8 @@ def analyze_cognitive_friction(input_data: CognitiveFrictionInput, image_base64:
                 "\n"
                 "After extracting text from image and combining with provided text, analyze everything for cognitive friction, trust, emotional clarity, and decision blockers.\n"
                 "\n"
-                f"Context: Platform={input_data.platform}, Goal={input_data.goal}, Audience={input_data.audience}, Language={input_data.language}"
+                f"Context: Platform={input_data.platform}, Goal={input_data.goal}, Audience={input_data.audience}, Language={input_data.language}\n\n"
+                f"{OUTPUT_REQUIREMENTS_MESSAGE}"
             )
         else:
             # Image-only mode: Extract text from image
@@ -742,7 +1622,8 @@ def analyze_cognitive_friction(input_data: CognitiveFrictionInput, image_base64:
                 "CRITICAL: If you can see text in the image, extract it and analyze it. "
                 "DO NOT say the page is 'empty' or 'has no content' if there is visible text in the image.\n"
                 "\n"
-                f"Context: Platform={input_data.platform}, Goal={input_data.goal}, Audience={input_data.audience}, Language={input_data.language}"
+                f"Context: Platform={input_data.platform}, Goal={input_data.goal}, Audience={input_data.audience}, Language={input_data.language}\n\n"
+                f"{OUTPUT_REQUIREMENTS_MESSAGE}"
             )
         
         user_content.append({"type": "text", "text": text_instruction})
@@ -762,6 +1643,8 @@ def analyze_cognitive_friction(input_data: CognitiveFrictionInput, image_base64:
         
         # Use Vision-capable model
         model = "gpt-4o-mini"  # Supports vision
+        if model_override:
+            model = model_override
         print(f"[cognitive_friction] Using Vision API with model={model}")
         
     else:
@@ -771,7 +1654,8 @@ def analyze_cognitive_friction(input_data: CognitiveFrictionInput, image_base64:
         user_message_text = (
             f"{platform_context}\n\n"
             f"Content to analyze:\n{input_data.raw_text}\n\n"
-            f"Context: Platform={input_data.platform}, Goal={input_data.goal}, Audience={input_data.audience}, Language={input_data.language}"
+            f"Context: Platform={input_data.platform}, Goal={input_data.goal}, Audience={input_data.audience}, Language={input_data.language}\n\n"
+            f"{OUTPUT_REQUIREMENTS_MESSAGE}"
         )
         
         messages = [
@@ -780,6 +1664,8 @@ def analyze_cognitive_friction(input_data: CognitiveFrictionInput, image_base64:
         ]
         
         model = "gpt-4o-mini"
+        if model_override:
+            model = model_override
         print(f"[cognitive_friction] Using text-only API with model={model}, platform={input_data.platform}")
     
     # Call OpenAI API
@@ -797,101 +1683,70 @@ def analyze_cognitive_friction(input_data: CognitiveFrictionInput, image_base64:
         print(f"[cognitive_friction] Raw response length: {len(raw_content)} characters")
         print(f"[cognitive_friction] Raw response preview: {raw_content[:300]}...")
         
-        # Parse JSON safely
+        parsed_payload, parsed_raw_content = _parse_model_response_with_retry(
+            client, model, raw_content
+        )
         try:
-            from json_utils import safe_parse_json
-            data = safe_parse_json(raw_content, context="cognitive friction analysis")
-            
-            # Ensure decisionProbability is 0-1 (convert if 0-100)
-            if "decisionProbability" in data:
-                dp = data["decisionProbability"]
-                if dp > 1:
-                    data["decisionProbability"] = dp / 100.0
-            
-            # Ensure all required fields exist with defaults
-            required_fields = {
-                "frictionScore": 50.0,
-                "trustScore": 50.0,
-                "emotionalClarityScore": 50.0,
-                "motivationMatchScore": 50.0,
-                "decisionProbability": 0.5,
-                "conversionLiftEstimate": 0.0,
-                "keyDecisionBlockers": [],
-                "emotionalResistanceFactors": [],
-                "cognitiveOverloadFactors": [],
-                "trustBreakpoints": [],
-                "motivationMisalignments": [],
-                "recommendedQuickWins": [],
-                "recommendedDeepChanges": [],
-                "explanationSummary": "Analysis completed."
-            }
-            
-            for key, default_value in required_fields.items():
-                if key not in data:
-                    data[key] = default_value
-            
-            result = CognitiveFrictionResult(**data)
-            print(f"[cognitive_friction] ✅ Successfully parsed JSON response from OpenAI")
-            print(f"[cognitive_friction] Result: friction={result.frictionScore}, trust={result.trustScore}, decisionProb={result.decisionProbability}")
-            print(f"[cognitive_friction] Blockers count: {len(result.keyDecisionBlockers)}")
-            
-            # If image-only mode and the AI still says "empty", override with visual-based analysis
-            visual_only_mode = has_image and not has_text
-            if visual_only_mode:
-                # Check if AI returned "empty page" response even though an image exists
-                empty_phrases = [
-                    "empty",
-                    "no content",
-                    "completely empty",
-                    "no visible text",
-                    "nothing to analyze",
-                    "blank page",
-                    "no copy",
-                    "no readable text",
-                ]
-
-                def contains_empty_phrase(text: str) -> bool:
-                    text_lower = (text or "").lower()
-                    return any(phrase in text_lower for phrase in empty_phrases)
-
-                blockers_flag = any(contains_empty_phrase(blocker) for blocker in result.keyDecisionBlockers)
-                summary_flag = contains_empty_phrase(result.explanationSummary or "")
-                score_flag = result.frictionScore >= 90 and result.trustScore <= 10
-
-                if blockers_flag or summary_flag or score_flag:
-                    print("⚠️ AI returned 'empty page' cues in visual mode. Overriding with visual-based analysis.")
-                    # Override with visual-based analysis using image_score
-                    visual_result = build_visual_only_analysis(
-                        image_score=image_score,
-                        extracted_text_summary=result.explanationSummary[:200] if result.explanationSummary else ""
-                    )
-                    return visual_result
-            
-            return result
-            
-        except (json.JSONDecodeError, ValueError) as e:
-            # Fallback: return a low-confidence default structure
-            print(f"⚠️ JSON parsing error in cognitive friction analysis: {str(e)}")
-            print(f"⚠️ Raw response preview: {raw_content[:500] if 'raw_content' in locals() else 'No response'}")
-            import traceback
-            traceback.print_exc()
-            return CognitiveFrictionResult(
-                frictionScore=50.0,
-                trustScore=50.0,
-                emotionalClarityScore=50.0,
-                motivationMatchScore=50.0,
-                decisionProbability=0.5,
-                conversionLiftEstimate=0.0,
-                keyDecisionBlockers=["Model failed to return valid JSON. Using fallback result."],
-                emotionalResistanceFactors=[],
-                cognitiveOverloadFactors=[],
-                trustBreakpoints=[],
-                motivationMisalignments=[],
-                recommendedQuickWins=[],
-                recommendedDeepChanges=[],
-                explanationSummary="The AI model did not return valid JSON, so this is a fallback neutral result."
+            result = validate_cognitive_response(parsed_payload)
+        except (ValidationError, ValueError) as validation_error:
+            logger.error(
+                "[validation] Unable to coerce AI response into schema: %s",
+                validation_error,
             )
+            raise InvalidAIResponseError(raw_output=parsed_raw_content) from validation_error
+
+        print(f"[cognitive_friction] ✅ Successfully parsed JSON response from OpenAI")
+        print(
+            f"[cognitive_friction] Result: friction={result.frictionScore}, trust={result.trustScore}, decisionProb={result.decisionProbability}"
+        )
+        print(
+            f"[cognitive_friction] Blockers count: {len(result.keyDecisionBlockers)}"
+        )
+
+        # If image-only mode and the AI still says "empty", override with visual-based analysis
+        visual_only_mode = has_image and not has_text
+        if visual_only_mode:
+            # Check if AI returned "empty page" response even though an image exists
+            empty_phrases = [
+                "empty",
+                "no content",
+                "completely empty",
+                "no visible text",
+                "nothing to analyze",
+                "blank page",
+                "no copy",
+                "no readable text",
+            ]
+
+            def contains_empty_phrase(text: str) -> bool:
+                text_lower = (text or "").lower()
+                return any(phrase in text_lower for phrase in empty_phrases)
+
+            blockers_flag = any(
+                contains_empty_phrase(blocker) for blocker in result.keyDecisionBlockers
+            )
+            summary_flag = contains_empty_phrase(result.explanationSummary or "")
+            score_flag = result.frictionScore >= 90 and result.trustScore <= 10
+
+            if blockers_flag or summary_flag or score_flag:
+                print(
+                    "⚠️ AI returned 'empty page' cues in visual mode. Overriding with visual-based analysis."
+                )
+                # Override with visual-based analysis using image_score
+                visual_result = build_visual_only_analysis(
+                    image_score=image_score,
+                    extracted_text_summary=(
+                        result.explanationSummary[:200]
+                        if result.explanationSummary
+                        else ""
+                    ),
+                )
+                return visual_result
+
+        return result
     
+    except InvalidAIResponseError:
+        raise
     except Exception as e:
         print(f"❌ Error in analyze_cognitive_friction: {type(e).__name__}: {e}")
         import traceback

@@ -8,6 +8,7 @@ Deployment:
   Module path: api.main:app
 """
 from fastapi import APIRouter, FastAPI, HTTPException, UploadFile, File, Form, Request
+from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -43,10 +44,12 @@ from chat import chat_completion, chat_completion_with_image
 from cognitive_friction_engine import (
     analyze_cognitive_friction,
     CognitiveFrictionInput,
-    CognitiveFrictionResult
+    CognitiveFrictionResult,
+    InvalidAIResponseError,
 )
 from psychology_engine import (
     analyze_psychology,
+    analyze_advanced_psychology,
     PsychologyAnalysisInput,
     PsychologyAnalysisResult
 )
@@ -54,6 +57,7 @@ from rewrite_engine import rewrite_text
 from models.rewrite_models import RewriteInput, RewriteOutput
 from visual_trust_engine import analyze_visual_trust_from_path
 from api.routes.image_trust import router as image_trust_router
+from api.routes.training_landing_friction import router as landing_friction_training_router
 
 # Load environment variables
 # Try loading from project root .env file
@@ -63,6 +67,47 @@ if env_file.exists():
     load_dotenv(env_file, override=True)
 else:
     load_dotenv()
+
+PSYCHOLOGY_FINE_TUNE_MODEL_PATH = (
+    project_root / "data" / "psychology_training" / "fine_tune" / "last_model.json"
+)
+
+
+def load_psychology_finetune_model_id() -> str:
+    """
+    Read the last fine-tuned psychology model id from disk.
+    """
+    if not PSYCHOLOGY_FINE_TUNE_MODEL_PATH.exists():
+        raise FileNotFoundError(
+            f"Fine-tuned model metadata not found at {PSYCHOLOGY_FINE_TUNE_MODEL_PATH}"
+        )
+
+    try:
+        raw_data = PSYCHOLOGY_FINE_TUNE_MODEL_PATH.read_text(encoding="utf-8")
+        metadata = json.loads(raw_data)
+    except json.JSONDecodeError as exc:
+        raise ValueError(
+            f"Invalid JSON in {PSYCHOLOGY_FINE_TUNE_MODEL_PATH}: {exc}"
+        ) from exc
+    except OSError as exc:
+        raise ValueError(
+            f"Unable to read {PSYCHOLOGY_FINE_TUNE_MODEL_PATH}: {exc}"
+        ) from exc
+
+    model_id = None
+    if isinstance(metadata, dict):
+        model_id = metadata.get("model_id") or metadata.get("model") or metadata.get(
+            "fine_tuned_model"
+        )
+    elif isinstance(metadata, str):
+        model_id = metadata.strip()
+
+    if not model_id:
+        raise ValueError(
+            f"No model id found inside {PSYCHOLOGY_FINE_TUNE_MODEL_PATH}. "
+            "Ensure the fine-tune job metadata is saved correctly."
+        )
+    return model_id
 
 # Initialize FastAPI app
 app = FastAPI(title="Nima AI Brain API", version="1.0.0")
@@ -166,6 +211,7 @@ def include_dataset_router(app: FastAPI) -> None:
 
 include_dataset_router(app)
 app.include_router(image_trust_router)
+app.include_router(landing_friction_training_router)
 
 
 # ====================================================
@@ -727,6 +773,7 @@ async def cognitive_friction_endpoint(
     audience: Optional[str] = Form(None),
     language: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
+    use_trained_model: Optional[str] = Form(None),
 ):
     """
     Cognitive Friction & Decision Psychology Analysis Endpoint
@@ -757,6 +804,10 @@ async def cognitive_friction_endpoint(
     try:
         # Handle both JSON and form-data requests
         content_type = request.headers.get("content-type", "")
+        image_base64 = None
+        image_mime = None
+        image_score_value = None
+        use_trained_model_flag = False
         
         if "application/json" in content_type:
             # JSON request (may include image as base64 string)
@@ -764,9 +815,6 @@ async def cognitive_friction_endpoint(
                 body = await request.json()
                 
                 # Extract image if provided as base64 string in JSON
-                image_base64 = None
-                image_mime = None
-                image_score_value = None
                 
                 if body.get("image"):
                     # Image is provided as base64 string
@@ -808,8 +856,21 @@ async def cognitive_friction_endpoint(
                 else:
                     print(f"[/api/brain/cognitive-friction] No image found in JSON body")
                 
+                use_trained_model_flag = bool(body.get("use_trained_model", False))
                 # Remove image fields from body before creating input_data
-                body_for_input = {k: v for k, v in body.items() if k not in ["image", "image_type", "image_mime", "image_name", "meta"]}
+                body_for_input = {
+                    k: v
+                    for k, v in body.items()
+                    if k
+                    not in [
+                        "image",
+                        "image_type",
+                        "image_mime",
+                        "image_name",
+                        "meta",
+                        "use_trained_model",
+                    ]
+                }
                 
                 # Ensure required fields have defaults
                 if "raw_text" not in body_for_input:
@@ -890,6 +951,12 @@ async def cognitive_friction_endpoint(
             # Use form image if available, otherwise use JSON image
             image_base64 = image_base64_form if image_base64_form else image_base64
             image_mime = image_mime_form if image_mime_form else image_mime
+
+            if use_trained_model_form := use_trained_model:
+                if isinstance(use_trained_model_form, str):
+                    use_trained_model_flag = use_trained_model_form.strip().lower() in {"1", "true", "yes"}
+                else:
+                    use_trained_model_flag = bool(use_trained_model_form)
         
         # Validate: at least one of text or image must be provided
         has_text = input_data.raw_text and input_data.raw_text.strip()
@@ -911,21 +978,77 @@ async def cognitive_friction_endpoint(
                 detail=error_detail
             )
         
+        if use_trained_model_flag and has_image:
+            raise HTTPException(
+                status_code=400,
+                detail="Fine-tuned model currently supports text-only analysis. Remove the image or disable use_trained_model.",
+            )
+
+        finetuned_model_id = None
+        if use_trained_model_flag:
+            try:
+                finetuned_model_id = load_psychology_finetune_model_id()
+            except FileNotFoundError as err:
+                raise HTTPException(status_code=404, detail=str(err)) from err
+            except ValueError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from err
+
         # Call analysis with optional image and image_score
         print(f"[/api/brain/cognitive-friction] Calling analyze_cognitive_friction...")
         print(f"  - has_text: {has_text} (length: {len(input_data.raw_text) if input_data.raw_text else 0})")
         print(f"  - has_image: {has_image} (mime: {image_mime})")
         print(f"  - image_score: {image_score_value}")
+        print(f"  - use_trained_model: {use_trained_model_flag} (model_id={finetuned_model_id})")
         
         try:
             result = analyze_cognitive_friction(
-                input_data, 
-                image_base64=image_base64, 
+                input_data,
+                image_base64=image_base64,
                 image_mime=image_mime,
-                image_score=image_score_value
+                image_score=image_score_value,
+                model_override=finetuned_model_id,
             )
+
+            psychology_payload: Optional[PsychologyAnalysisResult] = None
+            if has_text:
+                try:
+                    advanced_view = analyze_advanced_psychology(
+                        input_data.raw_text,
+                        platform=input_data.platform,
+                        goal=input_data.goal,
+                        audience=input_data.audience,
+                        language=input_data.language,
+                    )
+                    psychology_payload = PsychologyAnalysisResult(
+                        analysis=None,
+                        overall={
+                            "summary": "Advanced psychological view generated alongside cognitive friction analysis.",
+                            "global_score": None,
+                        },
+                        human_readable_report="Advanced psychological dashboard data.",
+                        advanced_view=advanced_view,
+                    )
+                except Exception as psych_error:
+                    print(
+                        f"[/api/brain/cognitive-friction] ⚠️ Advanced psychology analysis failed: {psych_error}"
+                    )
+
+            if psychology_payload:
+                result.psychology = psychology_payload
+
             print(f"[/api/brain/cognitive-friction] ✅ Analysis completed successfully")
             return result
+        except InvalidAIResponseError as invalid_err:
+            print(
+                f"\n❌ Invalid AI response structure; returning HTTP 500. raw length={len(invalid_err.raw_output)}"
+            )
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": "AI returned invalid structure",
+                    "raw_output": invalid_err.raw_output,
+                },
+            )
         except ValueError as ve:
             print(f"\n❌ ValueError in analyze_cognitive_friction: {ve}")
             import traceback
