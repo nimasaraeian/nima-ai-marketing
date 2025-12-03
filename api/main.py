@@ -7,7 +7,7 @@ Deployment:
   
   Module path: api.main:app
 """
-from fastapi import FastAPI, HTTPException, UploadFile, File, Form, Request
+from fastapi import APIRouter, FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from dotenv import load_dotenv
@@ -52,7 +52,6 @@ from psychology_engine import (
 )
 from rewrite_engine import rewrite_text
 from models.rewrite_models import RewriteInput, RewriteOutput
-from dataset_upload import router as dataset_router
 from visual_trust_engine import analyze_visual_trust_from_path
 from api.routes.image_trust import router as image_trust_router
 
@@ -135,7 +134,37 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 # Register routers
-app.include_router(dataset_router)
+
+
+def include_dataset_router(app: FastAPI) -> None:
+    """
+    Attempt to register the dataset upload router. If python-multipart is missing
+    (which FastAPI requires for UploadFile/Form parsing), install instructions
+    are returned via a stub endpoint instead of crashing the whole app.
+    """
+    logger = logging.getLogger("brain")
+    try:
+        from dataset_upload import router as dataset_router  # local import to catch runtime errors
+    except RuntimeError as exc:
+        warning = (
+            "Dataset upload endpoint is disabled because python-multipart is not installed on the server. "
+            "Install python-multipart>=0.0.9 and redeploy to enable image uploads."
+        )
+        logger.error("Dataset upload router disabled: %s", exc)
+
+        fallback_router = APIRouter(prefix="/api/dataset", tags=["dataset"])
+
+        @fallback_router.post("/upload-image")
+        async def dataset_upload_unavailable() -> dict[str, str]:
+            raise HTTPException(status_code=503, detail=warning)
+
+        app.include_router(fallback_router)
+        return
+
+    app.include_router(dataset_router)
+
+
+include_dataset_router(app)
 app.include_router(image_trust_router)
 
 
