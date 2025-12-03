@@ -20,21 +20,13 @@ Which returns:
     }
 """
 
-import logging
 import os
 import sys
 from pathlib import Path
-from typing import Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
-
-try:
-    import tensorflow as tf  # type: ignore
-except ModuleNotFoundError as exc:  # pragma: no cover - environment specific
-    tf = None  # type: ignore
-    _TF_IMPORT_ERROR = exc
-else:
-    _TF_IMPORT_ERROR = None
+import tensorflow as tf
 
 
 # Ensure project root is on sys.path so we can import training modules if needed
@@ -47,23 +39,9 @@ MODEL_PATH = MODELS_DIR / "visual_trust_model.keras"
 CLASS_NAMES_PATH = MODELS_DIR / "visual_trust_class_names.txt"
 
 # Global caches so we don't reload on every request
-_MODEL: "tf.keras.Model | None" = None
+_MODEL: Optional[Any] = None
 _CLASS_NAMES: List[str] | None = None
 _PREPROCESS_FN = None
-TF_AVAILABLE = _TF_IMPORT_ERROR is None
-LOGGER = logging.getLogger("visual_trust_engine")
-TF_WARNING = (
-    "TensorFlow is not installed. Visual trust scoring is disabled. "
-    "Install tensorflow>=2.15 and set PYTHON_VERSION=3.12 on Render to enable this feature."
-)
-
-
-def _ensure_tensorflow() -> None:
-    """
-    Guard helper to raise a descriptive error when TensorFlow is missing.
-    """
-    if not TF_AVAILABLE:
-        raise RuntimeError(TF_WARNING) from _TF_IMPORT_ERROR
 
 
 def _load_class_names() -> List[str]:
@@ -107,7 +85,6 @@ def _get_preprocess_fn():
     Return the preprocessing function matching the backbone (EfficientNetB0).
     Cached after first import.
     """
-    _ensure_tensorflow()
     global _PREPROCESS_FN
     if _PREPROCESS_FN is None:
         from tensorflow.keras.applications.efficientnet import preprocess_input
@@ -116,11 +93,10 @@ def _get_preprocess_fn():
     return _PREPROCESS_FN
 
 
-def _load_model() -> tf.keras.Model:
+def _load_model() -> Any:
     """
     Load the trained Keras model once and cache it in memory.
     """
-    _ensure_tensorflow()
     global _MODEL
     if _MODEL is not None:
         return _MODEL
@@ -178,25 +154,6 @@ def analyze_visual_trust_from_path(image_path: str) -> Dict:
     image_path = str(image_path)
     if not os.path.isfile(image_path):
         raise FileNotFoundError(f"Image file not found for visual trust analysis: {image_path}")
-
-    if not TF_AVAILABLE:
-        LOGGER.warning("%s", TF_WARNING)
-        trust_label = "medium_trust"
-        fallback_scores = {
-            "high_trust": 0.34,
-            "medium_trust": 0.33,
-            "low_trust": 0.33,
-        }
-
-        return {
-            "trust_label": trust_label,
-            "trust_scores": fallback_scores,
-            "trust_score_numeric": _map_label_to_numeric(trust_label),
-            "visual_comment": (
-                "TensorFlow is missing on the server, returning a neutral trust estimate. "
-                "Deploy with tensorflow installed to enable the trained model."
-            ),
-        }
 
     model = _load_model()
     class_names = _load_class_names()
