@@ -16,32 +16,42 @@
 
 /**
  * @typedef {Object} CognitiveFrictionResult
- * @property {number} frictionScore - Overall cognitive friction (0-100)
- * @property {number} trustScore - Perceived trust level (0-100)
- * @property {number} emotionalClarityScore - Emotional clarity & resonance (0-100)
- * @property {number} motivationMatchScore - Alignment with user motivation (0-100)
- * @property {number} decisionProbability - Likelihood user will decide/act (0-1)
- * @property {number} conversionLiftEstimate - % improvement if issues fixed (-100 to +100)
- * @property {string[]} ?keyDecisionBlockers - Main blockers (bulleted reasons)
- * @property {string[]} ?emotionalResistanceFactors - Emotional resistance factors
- * @property {string[]} ?cognitiveOverloadFactors - Cognitive overload factors
- * @property {string[]} ?trustBreakpoints - Trust breakpoints
- * @property {string[]} ?motivationMisalignments - Motivation misalignments
- * @property {string[]} ?recommendedQuickWins - Actionable quick fixes
- * @property {string[]} ?recommendedDeepChanges - Deeper structural changes
- * @property {string} explanationSummary - 3-6 sentences, plain language summary of the analysis
- * @property {any} psychology_dashboard - 13-dimension psychology dashboard for the analyzed landing page
- * @property {any} ?psychology - Full psychology analysis payload including advanced view.
+ * @property {number} frictionScore
+ * @property {number} trustScore
+ * @property {number} emotionalClarityScore
+ * @property {number} motivationMatchScore
+ * @property {number} decisionProbability
+ * @property {number} conversionLiftEstimate
+ * @property {string[]} ?keyDecisionBlockers
+ * @property {string[]} ?emotionalResistanceFactors
+ * @property {string[]} ?cognitiveOverloadFactors
+ * @property {string[]} ?trustBreakpoints
+ * @property {string[]} ?motivationMisalignments
+ * @property {string[]} ?recommendedQuickWins
+ * @property {string[]} ?recommendedDeepChanges
+ * @property {string} explanationSummary - 3-6 sentence natural language explanation summarizing the findings.
+ * @property {any} ?psychology_dashboard - Optional 13-pillar psychology dashboard payload.
+ * @property {any} ?psychology - Optional advanced psychology payload injected by main API layer.
+ * @property {any} ?raw_model_output - Raw JSON string returned by the AI model (for debugging).
+ * @property {any} ?metadata - Additional diagnostic metadata (model name, timings, etc.).
+ * @property {any} ?primary_diagnosis - Primary diagnosis sentence focused on psychological root cause.
+ * @property {any} ?page_structure - Structured reconstruction of the landing page layout.
+ * @property {any} ?decision_blockers - Structured blockers grouped by pillar bucket.
+ * @property {any} ?ai_recommendations - Structured recommendations grouped by priority buckets.
+ * @property {any} ?visual_trust_analysis - Structured visual trust evaluation for accompanying imagery.
+ * @property {any} ?psychology_narrative - Human-readable psychology narrative (analysis + interpretation).
+ * @property {any} ?visual_textual_psychology_analysis - Per-element visual/textual analysis map (when provided).
+ * @property {any} ?visual_trust_score - Optional numeric trust score from the visual trust engine (0-100).
  */
 
 /**
  * @typedef {Object} CognitiveFrictionInput
- * @property {string} ?raw_text - The content/post/copy to analyze (empty string allowed if image is provided)
- * @property {string} platform - Platform type for analysis
- * @property {string[]} goal - Goals: clicks, leads, sales, engagement, etc.
- * @property {string} audience - Audience type: cold, warm, retargeting, etc.
- * @property {string} ?language - Language code: en, tr, fa, etc.
- * @property {any} ?meta - Optional metadata for future use
+ * @property {string} ?raw_text - Marketing copy or landing page text to analyze. Can be empty if an image is provided.
+ * @property {string} ?platform - Content platform/category.
+ * @property {string[]} ?goal - List of marketing goals such as leads, clicks, or sales.
+ * @property {string} ?audience - Audience type (cold, warm, retargeting, etc.).
+ * @property {string} ?language - Language/locale hint for the analysis.
+ * @property {any} ?meta - Optional metadata bag for future extensibility.
  */
 
 /**
