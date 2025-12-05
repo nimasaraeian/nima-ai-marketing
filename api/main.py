@@ -19,7 +19,8 @@ import json
 import logging
 import io
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Dict, Any
+from uuid import uuid4
 from PIL import Image
 import numpy as np
 
@@ -46,6 +47,7 @@ from cognitive_friction_engine import (
     CognitiveFrictionInput,
     CognitiveFrictionResult,
     InvalidAIResponseError,
+    VisualTrustAnalysis,
 )
 from psychology_engine import (
     analyze_psychology,
@@ -256,7 +258,6 @@ def compute_image_score_from_bytes(data: bytes) -> Optional[float]:
 
         # To stay perfectly aligned with the visual_trust_engine preprocessing and scoring,
         # we write the bytes to a temporary file and call analyze_visual_trust_from_path.
-        from uuid import uuid4
         from visual_trust_engine import analyze_visual_trust_from_path
 
         project_root = Path(__file__).parent.parent
@@ -293,6 +294,75 @@ def compute_image_score_from_bytes(data: bytes) -> Optional[float]:
                 tmp_path.unlink()
         except Exception:
             # Non-fatal if cleanup fails
+            pass
+
+
+def _safe_visual_trust_analysis(
+    *,
+    image_bytes: Optional[bytes],
+    image_name: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Run visual trust analysis but never raise exceptions outward.
+    Returns a simple dict with percentages and optional error field.
+    """
+    logger = logging.getLogger("visual_trust")
+    base_response: Dict[str, Any] = {
+        "overall_label": "not_available",
+        "low_percent": 0.0,
+        "medium_percent": 0.0,
+        "high_percent": 0.0,
+        "explanation": "Visual trust analysis not performed.",
+        "error": "no_image_provided",
+    }
+
+    if not image_bytes:
+        return base_response
+
+    tmp_dir = project_root / "dataset" / "tmp_visual_trust"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    ext = Path(image_name or "").suffix or ".png"
+    tmp_path = tmp_dir / f"visual_trust_{uuid4().hex}{ext}"
+
+    def _score_for_label(scores: Dict[str, Any], label_keyword: str) -> float:
+        for key, value in (scores or {}).items():
+            if label_keyword in key.lower():
+                try:
+                    return float(value) * 100.0
+                except (TypeError, ValueError):
+                    return 0.0
+        return 0.0
+
+    try:
+        with tmp_path.open("wb") as buffer:
+            buffer.write(image_bytes)
+
+        vt = analyze_visual_trust_from_path(str(tmp_path))
+        trust_scores = vt.get("trust_scores") or {}
+
+        return {
+            "overall_label": vt.get("trust_label") or "unknown",
+            "low_percent": _score_for_label(trust_scores, "low"),
+            "medium_percent": _score_for_label(trust_scores, "medium"),
+            "high_percent": _score_for_label(trust_scores, "high"),
+            "explanation": vt.get("visual_comment") or "",
+            "error": None,
+        }
+    except FileNotFoundError as err:
+        logger.exception("Visual trust model not found: %s", err)
+        response = base_response.copy()
+        response["error"] = "visual_trust_model_missing"
+        return response
+    except Exception as err:
+        logger.exception("Visual trust analysis failed: %s", err)
+        response = base_response.copy()
+        response["error"] = f"visual_trust_analysis_failed: {err}"
+        return response
+    finally:
+        try:
+            if tmp_path.exists():
+                tmp_path.unlink()
+        except Exception:
             pass
 
 
@@ -492,6 +562,7 @@ async def brain_endpoint(
                 image_data = await image.read()
                 image_filename = image.filename
                 image_size_bytes = len(image_data)
+                image_bytes_raw = image_data
                 
                 logger.warning("📸 Image received: filename=%s, size=%d bytes", image_filename, image_size_bytes)
                 logger.warning("🔍 First 50 bytes: %s", image_data[:50])
@@ -526,6 +597,7 @@ async def brain_endpoint(
                     image_data = await image_file.read()
                     image_filename = image_file.filename
                     image_size_bytes = len(image_data)
+                    image_bytes_raw = image_data
                     
                     logger.warning("📸 Image received from form_data: filename=%s, size=%d bytes", image_filename, image_size_bytes)
                     logger.warning("🔍 First 50 bytes: %s", image_data[:50])
@@ -808,6 +880,8 @@ async def cognitive_friction_endpoint(
         image_mime = None
         image_score_value = None
         use_trained_model_flag = False
+        image_bytes_raw: Optional[bytes] = None
+        image_filename: Optional[str] = None
         
         if "application/json" in content_type:
             # JSON request (may include image as base64 string)
@@ -842,8 +916,9 @@ async def cognitive_friction_endpoint(
                     
                     # Decode base64 to bytes for image score computation
                     try:
-                        import base64 as b64
-                        image_data = b64.b64decode(image_base64)
+                        image_data = base64.b64decode(image_base64)
+                        image_bytes_raw = image_data
+                        image_filename = body.get("image_name") or image_filename
                         if len(image_data) > 0:
                             image_score_value = compute_image_score_from_bytes(image_data)
                             print(f"[/api/brain/cognitive-friction] Image score from JSON: {image_score_value}")
@@ -1009,6 +1084,15 @@ async def cognitive_friction_endpoint(
                 model_override=finetuned_model_id,
             )
 
+            visual_trust_payload = _safe_visual_trust_analysis(
+                image_bytes=image_bytes_raw,
+                image_name=image_filename,
+            )
+            try:
+                result.visual_trust_analysis = VisualTrustAnalysis(**visual_trust_payload)
+            except Exception:
+                logger.warning("Failed to attach visual trust analysis payload", exc_info=True)
+
             psychology_payload: Optional[PsychologyAnalysisResult] = None
             if has_text:
                 try:
@@ -1066,6 +1150,36 @@ async def cognitive_friction_endpoint(
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/brain/image-trust")
+async def image_trust_endpoint(input_data: CognitiveFrictionInput):
+    """
+    Lightweight endpoint that evaluates only the visual trust block.
+    Always returns HTTP 200 with an explicit error field instead of raising 500.
+    """
+    logger = logging.getLogger("brain")
+    try:
+        image_bytes = None
+        if input_data.image:
+            try:
+                image_bytes = base64.b64decode(input_data.image)
+            except Exception as decode_error:
+                logger.exception("Invalid base64 payload for image trust: %s", decode_error)
+                response = _safe_visual_trust_analysis(image_bytes=None)
+                response["error"] = "invalid_image_payload"
+                return {"visual_trust_analysis": response}
+
+        visual_payload = _safe_visual_trust_analysis(
+            image_bytes=image_bytes,
+            image_name=input_data.image_name,
+        )
+        return {"visual_trust_analysis": visual_payload}
+    except Exception as exc:
+        logger.exception("Image trust endpoint crashed: %s", exc)
+        fallback = _safe_visual_trust_analysis(image_bytes=None)
+        fallback["error"] = "visual_trust_endpoint_failed"
+        return {"visual_trust_analysis": fallback}
 
 
 @app.post("/api/brain/rewrite", response_model=RewriteOutput)
@@ -1202,8 +1316,6 @@ async def psychology_analysis_with_image(
     visual_layer = None
 
     if image is not None:
-        from uuid import uuid4
-
         project_root = Path(__file__).parent.parent
         tmp_dir = project_root / "dataset" / "tmp_images"
         tmp_dir.mkdir(parents=True, exist_ok=True)

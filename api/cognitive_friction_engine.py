@@ -451,6 +451,18 @@ class CognitiveFrictionInput(BaseModel):
         default_factory=dict,
         description="Optional metadata bag for future extensibility.",
     )
+    image: Optional[str] = Field(
+        default=None,
+        description="Optional base64-encoded image screenshot for visual trust analysis.",
+    )
+    image_type: Optional[str] = Field(
+        default=None,
+        description="Optional MIME type for the uploaded image.",
+    )
+    image_name: Optional[str] = Field(
+        default=None,
+        description="Optional original filename for the uploaded image.",
+    )
 
     @staticmethod
     def _ensure_list(value: Any) -> List[str]:
@@ -553,6 +565,10 @@ class VisualTrustAnalysis(BaseModel):
     )
     explanation: Optional[str] = Field(
         default=None, description="Narrative explanation of the visual trust verdict."
+    )
+    error: Optional[str] = Field(
+        default=None,
+        description="Optional error code/message when visual trust analysis fails.",
     )
 
 

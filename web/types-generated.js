@@ -52,6 +52,9 @@
  * @property {string} ?audience - Audience type (cold, warm, retargeting, etc.).
  * @property {string} ?language - Language/locale hint for the analysis.
  * @property {any} ?meta - Optional metadata bag for future extensibility.
+ * @property {any} ?image - Optional base64-encoded image screenshot for visual trust analysis.
+ * @property {any} ?image_type - Optional MIME type for the uploaded image.
+ * @property {any} ?image_name - Optional original filename for the uploaded image.
  */
 
 /**
