@@ -59,37 +59,50 @@ def predict_image(file_bytes: bytes) -> Dict:
         Dictionary with:
             - trust_label: "low" | "medium" | "high"
             - trust_scores: dict mapping class names to probabilities
+    
+    Raises:
+        ValueError: If image cannot be loaded or processed
+        RuntimeError: If model prediction fails
     """
-    model = load_visual_trust_model()
+    try:
+        model = load_visual_trust_model()
+    except Exception as e:
+        raise RuntimeError(f"Failed to load visual trust model: {str(e)}") from e
 
-    # Load image from bytes
-    img = load_img(
-        io.BytesIO(file_bytes),
-        target_size=(224, 224)
-    )
-    arr = img_to_array(img)
-    arr = tf.expand_dims(arr, 0)
+    try:
+        # Load image from bytes
+        img = load_img(
+            io.BytesIO(file_bytes),
+            target_size=(224, 224)
+        )
+        arr = img_to_array(img)
+        arr = tf.expand_dims(arr, 0)
 
-    # IMPORTANT: apply EfficientNet preprocess
-    arr = preprocess_input(arr)
+        # IMPORTANT: apply EfficientNet preprocess
+        arr = preprocess_input(arr)
 
-    # Predict
-    preds = model.predict(arr, verbose=0)[0]
+        # Predict
+        preds = model.predict(arr, verbose=0)[0]
 
-    # Get predicted label
-    label_index = int(tf.argmax(preds))
-    trust_label = CLASS_NAMES[label_index]
+        # Get predicted label
+        label_index = int(tf.argmax(preds))
+        if label_index >= len(CLASS_NAMES):
+            raise ValueError(f"Invalid prediction index: {label_index}")
+        
+        trust_label = CLASS_NAMES[label_index]
 
-    # Build trust_scores dictionary
-    trust_scores = {
-        CLASS_NAMES[i]: float(preds[i])
-        for i in range(3)
-    }
+        # Build trust_scores dictionary
+        trust_scores = {
+            CLASS_NAMES[i]: float(preds[i])
+            for i in range(len(CLASS_NAMES))
+        }
 
-    return {
-        "trust_label": trust_label,
-        "trust_scores": trust_scores
-    }
+        return {
+            "trust_label": trust_label,
+            "trust_scores": trust_scores
+        }
+    except Exception as e:
+        raise ValueError(f"Failed to process image: {str(e)}") from e
 
 
 # Create router
@@ -122,6 +135,13 @@ async def analyze_image(file: UploadFile = File(...)):
         # Read file bytes
         file_bytes = await file.read()
         
+        # Validate file is not empty
+        if not file_bytes or len(file_bytes) == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Empty file provided. Please upload a valid image file."
+            )
+        
         # Validate it's an image
         if not file.content_type or not file.content_type.startswith("image/"):
             raise HTTPException(
@@ -136,17 +156,35 @@ async def analyze_image(file: UploadFile = File(...)):
             "success": True,
             "analysis": result
         }
-    except FileNotFoundError as e:
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is
+        raise
+    except (FileNotFoundError, RuntimeError) as e:
+        error_msg = str(e)
+        print(f"[ERROR] Visual trust model error: {error_msg}")
+        import traceback
+        traceback.print_exc()
         raise HTTPException(
             status_code=503,
-            detail=f"Visual trust model not available: {str(e)}"
+            detail=f"Visual trust model not available: {error_msg}"
+        )
+    except (ValueError, IOError, OSError) as e:
+        error_msg = str(e)
+        print(f"[ERROR] Image processing error: {error_msg}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid image file: {error_msg}"
         )
     except Exception as e:
-        print(f"[ERROR] Image trust analysis failed: {type(e).__name__}: {e}")
+        error_msg = str(e)
+        error_type = type(e).__name__
+        print(f"[ERROR] Image trust analysis failed: {error_type}: {error_msg}")
         import traceback
         traceback.print_exc()
         raise HTTPException(
             status_code=500,
-            detail=f"Image analysis failed: {str(e)}"
+            detail=f"Image analysis failed: {error_msg}"
         )
 

@@ -124,6 +124,8 @@ origins = [
     "http://127.0.0.1:3000",  # DEV: local development
     "http://localhost:8000",  # DEV: local development
     "http://127.0.0.1:8000",  # DEV: local development
+    "http://localhost:8080",  # DEV: local frontend server
+    "http://127.0.0.1:8080",  # DEV: local frontend server
 ]
 
 app.add_middleware(
