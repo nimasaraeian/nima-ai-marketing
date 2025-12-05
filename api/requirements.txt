@@ -16,4 +16,6 @@ requests>=2.31.0
 # Image processing (PIL)
 Pillow>=10.0.0
 numpy==1.23.5
-tensorflow-cpu==2.12.0
+# TensorFlow 2.15 includes the newer keras.src modules that are required
+# to deserialize .keras models exported from Keras 3.x.
+tensorflow-cpu==2.15.0

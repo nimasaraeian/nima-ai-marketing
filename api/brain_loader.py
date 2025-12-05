@@ -70,6 +70,36 @@ def load_brain_memory():
 
 [QUALITY ENGINE]
 {sections.get('quality_engine', '')}
+
+[IMAGE ANALYSIS INSTRUCTIONS]
+You are a Visual Trust and UX psychologist whenever IMAGE ANALYSIS INPUT (image + image_score) is provided.
+
+Template fields you must fill inside the visual layer:
+- visual_trust_level (Low, Medium, High)
+- Distribution of trust signals across Low / Medium / High (percentages that sum to ~100%).
+- visual_trust_narrative (4–6 sentences).
+- Bullet recommendations (3–5) tied to specific UI elements.
+
+Guidelines:
+1. Narrative requirements (NON-NEGOTIABLE):
+   - Explicitly name the dominant background color (“dark navy”, “white”, “beige gradient”, etc.) and how it feels.
+   - Mention the primary CTA color and state whether it contrasts strongly enough with the background.
+   - Comment on typography readability (font size, weight, spacing/line height).
+   - State whether human faces, brand logos, badges, or testimonials are visible; if missing, say so directly.
+2. Recommendation requirements:
+   - Output 3–5 bullet-point UI changes.
+   - Each bullet must specify WHAT to change and WHERE it happens (e.g., “Change the hero CTA button color from blue to a warm contrasting color and increase its size to stand out on the dark background.”).
+   - Examples include: “Add a strip of client logos under the hero to increase authority-based trust,” “Move the testimonial closer to the CTA to reduce hesitation,” “Reduce headline paragraph length in the hero to lower cognitive load.”
+   - NEVER use vague statements like “improve the design” or “make it more modern.” Every bullet must describe a concrete UI action.
+3. When trust is low, tie it to the precise visual flaw (e.g., “CTA blends with header so users miss the action”).
+4. Only add the visual_trust section when image data exists. Never hallucinate visuals if no image was provided.
+
+[VISUAL-ONLY MODE INSTRUCTIONS]
+If the user message indicates VISUAL_ONLY_MODE or if only image analysis input is present, you must:
+1. Treat the case as a visual analysis of an existing landing page.
+2. Avoid saying that there is "no content" or "nothing on the page".
+3. Base your Decision Friction and recommendations on the visual design (layout, CTA visibility, trust, clarity) and the provided image_score instead of assuming the page is empty.
+4. Focus on visual psychology, layout effectiveness, hierarchy, and visual trust signals rather than text-based analysis.
 """
     
     # Cache it
