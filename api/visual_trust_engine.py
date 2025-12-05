@@ -119,11 +119,16 @@ def _map_label_to_numeric(trust_label: str) -> float:
     Defaults can be adjusted later.
     """
     mapping: Dict[str, float] = {
+        "high": 80.0,
         "high_trust": 80.0,
+        "medium": 50.0,
         "medium_trust": 50.0,
+        "low": 20.0,
         "low_trust": 20.0,
     }
-    return mapping.get(trust_label, 50.0)
+    # Normalize label to lowercase for matching
+    label_lower = trust_label.lower()
+    return mapping.get(label_lower, 50.0)
 
 
 def _build_visual_comment(trust_label: str) -> str:
