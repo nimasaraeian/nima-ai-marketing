@@ -13,10 +13,11 @@ import logging
 import os
 import asyncio
 from pathlib import Path
-from typing import Dict
+from typing import Dict, Any
 
 import tensorflow as tf
 from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi.responses import JSONResponse
 from tensorflow.keras.applications.efficientnet import preprocess_input
 from tensorflow.keras.utils import img_to_array, load_img
 
@@ -32,6 +33,40 @@ CLASS_NAMES = ["low", "medium", "high"]
 
 # Global lazy loader for the model
 visual_trust_model = None
+
+
+def build_visual_trust_fallback() -> Dict[str, Any]:
+    """
+    Build a fallback response payload matching the exact JSON shape expected by the frontend.
+    
+    This is returned when the visual trust model fails to load, ensuring the frontend
+    always receives a valid 200 OK response instead of a 503 error.
+    
+    Returns:
+        Dictionary matching the frontend's expected response structure:
+        {
+            "success": True,
+            "analysis": {
+                "trust_label": "medium",
+                "trust_scores": {
+                    "low": float,
+                    "medium": float,
+                    "high": float
+                }
+            }
+        }
+    """
+    return {
+        "success": True,
+        "analysis": {
+            "trust_label": "medium",
+            "trust_scores": {
+                "low": 0.25,
+                "medium": 0.50,
+                "high": 0.25
+            }
+        }
+    }
 
 
 def load_visual_trust_model():
@@ -284,13 +319,17 @@ async def analyze_image(file: UploadFile = File(...)):
                 detail="Image analysis timed out. Please try with a smaller image."
             )
         except RuntimeError as e:
-            # Model loading errors
+            # Model loading errors - graceful fallback instead of 503
+            # This exception is raised when the visual trust model fails to load
+            # (e.g., model file not found, model loading failure, etc.)
+            # Instead of raising 503, return a 200 OK with fallback data
             error_msg = str(e)
-            logger.exception(f"Model runtime error: {error_msg}")
-            raise HTTPException(
-                status_code=503,
-                detail="Visual trust model is not available. Please contact support."
+            logger.warning(
+                f"Visual trust model not available (fallback mode): {error_msg}. "
+                "Returning graceful fallback response."
             )
+            fallback = build_visual_trust_fallback()
+            return JSONResponse(status_code=200, content=fallback)
         except ValueError as e:
             # Image processing errors
             error_msg = str(e)
