@@ -13,6 +13,41 @@ export const IMAGE_TRUST_API_URL = `${BACKEND_BASE_URL}/api/analyze/image-trust`
 export const HEALTH_URL = `${BACKEND_BASE_URL}/health`;
 
 /**
+ * Generic POST function to backend API
+ * 
+ * @param endpoint - API endpoint path (e.g., '/api/brain/cognitive-friction')
+ * @param payload - Request body data
+ * @returns Promise with the response data
+ * @throws Error if the request fails
+ */
+export async function postToBrain<T = any>(endpoint: string, payload: any): Promise<T> {
+  const url = endpoint.startsWith('http') 
+    ? endpoint 
+    : `${BACKEND_BASE_URL}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+  
+  console.log('[Brain API] Fetching:', url);
+  console.log('[Brain API] Payload:', payload);
+
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    console.error('[Brain API] Error:', res.status, errorText);
+    throw new Error(`Failed to connect to backend API at ${endpoint}. Please ensure the backend is running on ${BACKEND_BASE_URL}`);
+  }
+
+  const data = await res.json();
+  console.log('✅ Brain API response received');
+  return data as T;
+}
+
+/**
  * Visual Trust Analysis API
  * 
  * Analyzes the visual trust level of an uploaded image.
