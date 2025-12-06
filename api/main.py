@@ -215,7 +215,7 @@ def include_dataset_router(app: FastAPI) -> None:
 
 
 include_dataset_router(app)
-app.include_router(image_trust_router)
+app.include_router(image_trust_router, prefix="/api/analyze/image-trust", tags=["image-trust"])
 app.include_router(landing_friction_training_router)
 
 

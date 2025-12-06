@@ -40,18 +40,34 @@ def load_visual_trust_model():
     
     Returns:
         Loaded Keras model
+    
+    Raises:
+        FileNotFoundError: If model file doesn't exist
+        RuntimeError: If model fails to load
     """
     global visual_trust_model
     if visual_trust_model is None:
+        # Check if model file exists
         if not MODEL_PATH.exists():
-            logger.error(f"Visual trust model not found at {MODEL_PATH}")
-            raise FileNotFoundError(
+            error_msg = (
                 f"Visual trust model not found at {MODEL_PATH}. "
+                f"Absolute path: {MODEL_PATH.resolve()}. "
+                f"Project root: {PROJECT_ROOT}. "
                 "Train the model first with: python training/train_visual_trust_model.py"
             )
-        logger.info(f"Loading visual trust model from {MODEL_PATH}...")
-        visual_trust_model = tf.keras.models.load_model(MODEL_PATH)
-        logger.info("Visual trust model loaded and cached successfully")
+            logger.error(error_msg)
+            raise FileNotFoundError(error_msg)
+        
+        try:
+            logger.info(f"Loading visual trust model from {MODEL_PATH}...")
+            logger.info(f"Model file size: {MODEL_PATH.stat().st_size / (1024*1024):.2f} MB")
+            visual_trust_model = tf.keras.models.load_model(MODEL_PATH)
+            logger.info("Visual trust model loaded and cached successfully")
+        except Exception as e:
+            error_msg = f"Failed to load visual trust model: {str(e)}"
+            logger.exception(error_msg)
+            raise RuntimeError(error_msg) from e
+    
     return visual_trust_model
 
 
@@ -116,7 +132,62 @@ def predict_image(file_bytes: bytes) -> Dict:
 router = APIRouter()
 
 
-@router.post("/api/analyze/image-trust")
+@router.get("/")
+async def image_trust_root():
+    """Root endpoint for image trust service."""
+    return {
+        "service": "image-trust",
+        "status": "active",
+        "endpoints": {
+            "health": "/api/analyze/image-trust/health",
+            "analyze": "/api/analyze/image-trust"
+        }
+    }
+
+
+@router.get("/health")
+async def image_trust_health():
+    """
+    Health check endpoint for image trust service.
+    Checks if model is available and can be loaded.
+    """
+    try:
+        # Check if model file exists
+        if not MODEL_PATH.exists():
+            return {
+                "status": "error",
+                "message": f"Model file not found at {MODEL_PATH}",
+                "model_available": False
+            }
+        
+        # Try to load model (this will cache it)
+        try:
+            model = load_visual_trust_model()
+            return {
+                "status": "healthy",
+                "message": "Visual trust model is available",
+                "model_available": True,
+                "model_path": str(MODEL_PATH),
+                "model_size_mb": round(MODEL_PATH.stat().st_size / (1024*1024), 2)
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"Model exists but failed to load: {str(e)}",
+                "model_available": False,
+                "error_type": type(e).__name__
+            }
+    except Exception as e:
+        logger.exception(f"Health check failed: {e}")
+        return {
+            "status": "error",
+            "message": f"Health check failed: {str(e)}",
+            "model_available": False
+        }
+
+
+@router.post("")
+@router.post("/")
 async def analyze_image(file: UploadFile = File(...)):
     """
     Analyze visual trust level of an uploaded image.
@@ -204,6 +275,22 @@ async def analyze_image(file: UploadFile = File(...)):
             raise HTTPException(
                 status_code=504,
                 detail="Image analysis timed out. Please try with a smaller image."
+            )
+        except RuntimeError as e:
+            # Model loading errors
+            error_msg = str(e)
+            logger.exception(f"Model runtime error: {error_msg}")
+            raise HTTPException(
+                status_code=503,
+                detail="Visual trust model is not available. Please contact support."
+            )
+        except ValueError as e:
+            # Image processing errors
+            error_msg = str(e)
+            logger.exception(f"Image processing error: {error_msg}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Failed to process image: {error_msg}"
             )
         
         # Log successful completion
