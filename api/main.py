@@ -120,6 +120,7 @@ app = FastAPI(title="Nima AI Brain API", version="1.0.0")
 origins = [
     "https://nimasaraeian.com",
     "https://www.nimasaraeian.com",
+    "https://nima-ai-marketing.onrender.com",  # Render deployment
     "http://localhost:3000",  # DEV: local development
     "http://127.0.0.1:3000",  # DEV: local development
     "http://localhost:8000",  # DEV: local development

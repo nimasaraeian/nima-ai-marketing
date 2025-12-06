@@ -9,6 +9,9 @@ Endpoint: POST /api/analyze/image-trust
 """
 
 import io
+import logging
+import os
+import asyncio
 from pathlib import Path
 from typing import Dict
 
@@ -16,6 +19,9 @@ import tensorflow as tf
 from fastapi import APIRouter, File, HTTPException, UploadFile
 from tensorflow.keras.applications.efficientnet import preprocess_input
 from tensorflow.keras.utils import img_to_array, load_img
+
+# Setup logger
+logger = logging.getLogger("image_trust")
 
 # Project root for model path
 PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -38,13 +44,14 @@ def load_visual_trust_model():
     global visual_trust_model
     if visual_trust_model is None:
         if not MODEL_PATH.exists():
+            logger.error(f"Visual trust model not found at {MODEL_PATH}")
             raise FileNotFoundError(
                 f"Visual trust model not found at {MODEL_PATH}. "
                 "Train the model first with: python training/train_visual_trust_model.py"
             )
-        print(f"[IMAGE_TRUST] Loading model from {MODEL_PATH}...")
+        logger.info(f"Loading visual trust model from {MODEL_PATH}...")
         visual_trust_model = tf.keras.models.load_model(MODEL_PATH)
-        print("[IMAGE_TRUST] Model loaded and cached.")
+        logger.info("Visual trust model loaded and cached successfully")
     return visual_trust_model
 
 
@@ -132,59 +139,115 @@ async def analyze_image(file: UploadFile = File(...)):
         }
     """
     try:
+        # Log incoming request details
+        filename = file.filename or "unknown"
+        content_type = file.content_type or "unknown"
+        logger.info(
+            f"Received image for trust analysis: filename={filename}, "
+            f"content_type={content_type}"
+        )
+        
+        # Log environment variables used (names only, not values)
+        env_vars_used = []
+        # Check if any environment variables are used in this module
+        # (Currently this endpoint doesn't use env vars, but log if any are checked)
+        if os.getenv("OPENAI_API_KEY"):
+            env_vars_used.append("OPENAI_API_KEY")
+        if os.getenv("TENSORFLOW_LOGGING_LEVEL"):
+            env_vars_used.append("TENSORFLOW_LOGGING_LEVEL")
+        if env_vars_used:
+            logger.info(f"Environment variables accessed: {', '.join(env_vars_used)}")
+        
         # Read file bytes
         file_bytes = await file.read()
+        file_size = len(file_bytes)
+        logger.info(f"Image file size: {file_size} bytes")
         
         # Validate file is not empty
-        if not file_bytes or len(file_bytes) == 0:
+        if not file_bytes or file_size == 0:
+            logger.warning("Empty file provided")
             raise HTTPException(
                 status_code=400,
                 detail="Empty file provided. Please upload a valid image file."
             )
         
+        # Validate file size (max 10MB to prevent memory issues on Render)
+        MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
+        if file_size > MAX_FILE_SIZE:
+            logger.warning(f"File too large: {file_size} bytes (max: {MAX_FILE_SIZE})")
+            raise HTTPException(
+                status_code=400,
+                detail=f"File too large. Maximum size is {MAX_FILE_SIZE // (1024*1024)}MB"
+            )
+        
         # Validate it's an image
-        if not file.content_type or not file.content_type.startswith("image/"):
+        if not content_type.startswith("image/"):
+            logger.warning(f"Invalid content type: {content_type}")
             raise HTTPException(
                 status_code=400,
                 detail="File must be an image (jpg, png, etc.)"
             )
         
-        # Predict
-        result = predict_image(file_bytes)
+        # Log model prediction start
+        logger.info("Starting visual trust prediction...")
+        
+        # Predict (this is the main logic - local TensorFlow model, no external API calls)
+        # Run in executor to prevent blocking and handle timeouts on Render
+        try:
+            loop = asyncio.get_event_loop()
+            result = await asyncio.wait_for(
+                loop.run_in_executor(None, predict_image, file_bytes),
+                timeout=55.0  # Render timeout is usually 60s, leave 5s buffer
+            )
+        except asyncio.TimeoutError:
+            logger.error("Visual trust prediction timed out (>55s)")
+            raise HTTPException(
+                status_code=504,
+                detail="Image analysis timed out. Please try with a smaller image."
+            )
+        
+        # Log successful completion
+        trust_label = result.get("trust_label", "unknown")
+        logger.info(
+            f"Image trust analysis completed successfully: "
+            f"trust_label={trust_label}, file_size={file_size} bytes"
+        )
         
         return {
             "success": True,
             "analysis": result
         }
+        
     except HTTPException:
-        # Re-raise HTTP exceptions as-is
+        # Re-raise HTTP exceptions as-is (these are intentional client errors)
         raise
+    except asyncio.TimeoutError:
+        # Timeout already handled above, but catch here as well for safety
+        logger.error("Request timeout in image trust analysis")
+        raise HTTPException(
+            status_code=504,
+            detail="Image trust analysis timed out on server"
+        )
     except (FileNotFoundError, RuntimeError) as e:
         error_msg = str(e)
-        print(f"[ERROR] Visual trust model error: {error_msg}")
-        import traceback
-        traceback.print_exc()
+        logger.exception(f"Visual trust model error: {error_msg}")
         raise HTTPException(
-            status_code=503,
-            detail=f"Visual trust model not available: {error_msg}"
+            status_code=500,
+            detail="Image trust analysis failed on server"
         )
     except (ValueError, IOError, OSError) as e:
         error_msg = str(e)
-        print(f"[ERROR] Image processing error: {error_msg}")
-        import traceback
-        traceback.print_exc()
+        logger.exception(f"Image processing error: {error_msg}")
         raise HTTPException(
-            status_code=400,
-            detail=f"Invalid image file: {error_msg}"
+            status_code=500,
+            detail="Image trust analysis failed on server"
         )
     except Exception as e:
         error_msg = str(e)
         error_type = type(e).__name__
-        print(f"[ERROR] Image trust analysis failed: {error_type}: {error_msg}")
-        import traceback
-        traceback.print_exc()
+        logger.exception(f"Unexpected error in image trust analysis: {error_type}: {error_msg}")
         raise HTTPException(
             status_code=500,
-            detail=f"Image analysis failed: {error_msg}"
+            detail="Image trust analysis failed on server"
         )
 
