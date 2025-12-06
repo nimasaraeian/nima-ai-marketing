@@ -210,6 +210,13 @@ async def analyze_image(file: UploadFile = File(...)):
         }
     """
     try:
+        logger.info(
+            "Image trust request received: filename=%s content_type=%s",
+            file.filename,
+            file.content_type,
+        )
+
+        # === YOUR EXISTING LOGIC STARTS HERE ===
         # Log incoming request details
         filename = file.filename or "unknown"
         content_type = file.content_type or "unknown"
@@ -304,37 +311,16 @@ async def analyze_image(file: UploadFile = File(...)):
             "success": True,
             "analysis": result
         }
-        
+        # === YOUR EXISTING LOGIC ENDS HERE ===
+
     except HTTPException:
         # Re-raise HTTP exceptions as-is (these are intentional client errors)
         raise
-    except asyncio.TimeoutError:
-        # Timeout already handled above, but catch here as well for safety
-        logger.error("Request timeout in image trust analysis")
-        raise HTTPException(
-            status_code=504,
-            detail="Image trust analysis timed out on server"
-        )
-    except (FileNotFoundError, RuntimeError) as e:
-        error_msg = str(e)
-        logger.exception(f"Visual trust model error: {error_msg}")
-        raise HTTPException(
-            status_code=500,
-            detail="Image trust analysis failed on server"
-        )
-    except (ValueError, IOError, OSError) as e:
-        error_msg = str(e)
-        logger.exception(f"Image processing error: {error_msg}")
-        raise HTTPException(
-            status_code=500,
-            detail="Image trust analysis failed on server"
-        )
     except Exception as e:
-        error_msg = str(e)
-        error_type = type(e).__name__
-        logger.exception(f"Unexpected error in image trust analysis: {error_type}: {error_msg}")
+        logger.exception("Image trust analysis crashed: %s", e)
+        # Return error detail so we can see it from frontend
         raise HTTPException(
             status_code=500,
-            detail="Image trust analysis failed on server"
+            detail=f"IMAGE_TRUST_ERROR: {str(e)}",
         )
 
