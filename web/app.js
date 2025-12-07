@@ -2,6 +2,64 @@
 const API_BASE_URL = 'http://127.0.0.1:8000';
 // For production, change to: const API_BASE_URL = 'https://api.nimasaraeian.com';
 
+// Helper function to check if server is running
+async function checkServerHealth() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/health`, {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        });
+        return response.ok;
+    } catch (error) {
+        return false;
+    }
+}
+
+// Helper function to parse error response
+async function parseErrorResponse(response) {
+    const contentType = response.headers.get('content-type') || '';
+    
+    // If response is HTML (not JSON), it's likely a hosting service error
+    if (contentType.includes('text/html')) {
+        const htmlText = await response.text();
+        
+        if (htmlText.includes('Service Suspended') || htmlText.includes('service has been suspended')) {
+            return {
+                type: 'service_suspended',
+                message: 'سرور در حال حاضر غیرفعال است. لطفاً سرور محلی را اجرا کنید یا با پشتیبانی تماس بگیرید.'
+            };
+        }
+        
+        if (htmlText.includes('404') || htmlText.includes('Not Found')) {
+            return {
+                type: 'not_found',
+                message: 'آدرس API یافت نشد. لطفاً مطمئن شوید سرور در حال اجرا است.'
+            };
+        }
+        
+        return {
+            type: 'html_response',
+            message: `سرور پاسخ HTML برگردانده است (احتمالاً سرور در حال اجرا نیست): ${response.status}`
+        };
+    }
+    
+    // Try to parse as JSON
+    try {
+        const json = await response.json();
+        return {
+            type: 'json_error',
+            message: json.detail || json.message || json.error || `خطای ${response.status}`,
+            data: json
+        };
+    } catch (e) {
+        const text = await response.text();
+        return {
+            type: 'unknown',
+            message: text || `خطای غیرمنتظره: ${response.status}`
+        };
+    }
+}
+
 // Module configurations
 const MODULE_CONFIGS = {
     deepscan: {
@@ -158,6 +216,12 @@ async function submitModule(moduleId, event) {
     closeModule();
     
     try {
+        // First check if server is running
+        const serverHealthy = await checkServerHealth();
+        if (!serverHealthy) {
+            throw new Error('SERVER_NOT_RUNNING');
+        }
+        
         const response = await fetch(`${API_BASE_URL}/api/brain`, {
             method: 'POST',
             headers: {
@@ -167,7 +231,15 @@ async function submitModule(moduleId, event) {
         });
         
         if (!response.ok) {
-            throw new Error(`API Error: ${response.status}`);
+            const errorInfo = await parseErrorResponse(response);
+            throw new Error(errorInfo.message || `خطای ${response.status}`);
+        }
+        
+        // Check if response is actually JSON
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            const errorInfo = await parseErrorResponse(response);
+            throw new Error(errorInfo.message || 'پاسخ سرور فرمت JSON ندارد');
         }
         
         const result = await response.json();
@@ -175,7 +247,21 @@ async function submitModule(moduleId, event) {
         
     } catch (error) {
         console.error('Error:', error);
-        alert('خطا در ارتباط با سرور. لطفاً مطمئن شوید سرور در حال اجرا است.');
+        
+        let errorMessage = 'خطا در ارتباط با سرور. ';
+        
+        if (error.message === 'SERVER_NOT_RUNNING') {
+            errorMessage += 'سرور در حال اجرا نیست. لطفاً سرور را با دستور زیر اجرا کنید:\n\n';
+            errorMessage += 'python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload';
+        } else if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+            errorMessage += 'نمی‌توان به سرور متصل شد. لطفاً:\n';
+            errorMessage += '1. مطمئن شوید سرور در حال اجرا است\n';
+            errorMessage += '2. آدرس API درست است: ' + API_BASE_URL;
+        } else {
+            errorMessage += error.message;
+        }
+        
+        alert(errorMessage);
     } finally {
         document.getElementById('loadingOverlay').classList.remove('active');
     }
@@ -314,15 +400,31 @@ async function submitVisualPsychologyWithImage(event) {
         });
 
         if (!response.ok) {
-            const errText = await response.text();
-            throw new Error(`API Error ${response.status}: ${errText}`);
+            const errorInfo = await parseErrorResponse(response);
+            throw new Error(errorInfo.message || `خطای ${response.status}`);
+        }
+
+        // Check if response is actually JSON
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+            const errorInfo = await parseErrorResponse(response);
+            throw new Error(errorInfo.message || 'پاسخ سرور فرمت JSON ندارد');
         }
 
         const result = await response.json();
         showVisualProResults(result);
     } catch (error) {
         console.error('Visual Pro error:', error);
-        alert('خطا در تحلیل متن + تصویر. لطفاً مطمئن شوید سرور و مدل بصری فعال هستند.');
+        
+        let errorMessage = 'خطا در تحلیل متن + تصویر. ';
+        
+        if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+            errorMessage += 'نمی‌توان به سرور متصل شد. لطفاً مطمئن شوید سرور در حال اجرا است.';
+        } else {
+            errorMessage += error.message;
+        }
+        
+        alert(errorMessage);
     } finally {
         document.getElementById('loadingOverlay').classList.remove('active');
     }
@@ -673,6 +775,55 @@ window.onclick = function(event) {
         closeResults();
     }
 }
+
+// Check server health when page loads
+document.addEventListener('DOMContentLoaded', async function() {
+    // Wait a bit to avoid blocking page render
+    setTimeout(async () => {
+        try {
+            const isHealthy = await checkServerHealth();
+            if (!isHealthy) {
+                console.warn('⚠️ سرور در حال اجرا نیست. لطفاً سرور را با دستور زیر اجرا کنید:');
+                console.warn('python -m uvicorn api.main:app --host 127.0.0.1 --port 8000 --reload');
+                
+                // Show a non-intrusive notification
+                const notification = document.createElement('div');
+                notification.style.cssText = `
+                    position: fixed;
+                    top: 20px;
+                    right: 20px;
+                    background: #ff9800;
+                    color: white;
+                    padding: 15px 20px;
+                    border-radius: 5px;
+                    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+                    z-index: 10000;
+                    max-width: 400px;
+                    font-family: Arial, sans-serif;
+                    direction: rtl;
+                `;
+                notification.innerHTML = `
+                    <strong>⚠️ هشدار:</strong><br>
+                    سرور در حال اجرا نیست. لطفاً سرور را اجرا کنید.<br>
+                    <small style="opacity: 0.9;">برای بستن کلیک کنید</small>
+                `;
+                notification.onclick = () => notification.remove();
+                document.body.appendChild(notification);
+                
+                // Auto-remove after 10 seconds
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.remove();
+                    }
+                }, 10000);
+            } else {
+                console.log('✅ سرور در حال اجرا است');
+            }
+        } catch (error) {
+            console.warn('⚠️ خطا در بررسی وضعیت سرور:', error);
+        }
+    }, 500);
+});
 
 
 
