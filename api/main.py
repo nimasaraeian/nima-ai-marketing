@@ -60,8 +60,8 @@ from rewrite_engine import rewrite_text
 from models.rewrite_models import RewriteInput, RewriteOutput
 from decision_engine import router as decision_engine_router
 from visual_trust_engine import analyze_visual_trust_from_path
-from api.routes.image_trust import router as image_trust_router
-from api.routes.training_landing_friction import router as landing_friction_training_router
+from routes.image_trust import router as image_trust_router
+from routes.training_landing_friction import router as landing_friction_training_router
 
 # Load environment variables
 # Try loading from project root .env file
