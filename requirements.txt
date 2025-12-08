@@ -1,3 +1,22 @@
--r api/requirements.txt
+# Core FastAPI dependencies
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.0.0
+
+# Environment and configuration
+python-dotenv>=1.0.0
+python-multipart>=0.0.9
+
+# OpenAI API client
+openai>=1.0.0
+
+# HTTP requests (for testing and external APIs)
+requests>=2.31.0
+beautifulsoup4>=4.12.0
+
+# Image processing (PIL)
+Pillow>=10.0.0
 numpy==1.23.5
+# TensorFlow 2.15 includes the newer keras.src modules that are required
+# to deserialize .keras models exported from Keras 3.x.
 tensorflow-cpu==2.15.0

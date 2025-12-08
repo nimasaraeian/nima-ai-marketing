@@ -48,6 +48,7 @@ from cognitive_friction_engine import (
     CognitiveFrictionResult,
     InvalidAIResponseError,
     VisualTrustAnalysis,
+    VisualTrustResult,
 )
 from psychology_engine import (
     analyze_psychology,
@@ -57,6 +58,7 @@ from psychology_engine import (
 )
 from rewrite_engine import rewrite_text
 from models.rewrite_models import RewriteInput, RewriteOutput
+from decision_engine import router as decision_engine_router
 from visual_trust_engine import analyze_visual_trust_from_path
 from api.routes.image_trust import router as image_trust_router
 from api.routes.training_landing_friction import router as landing_friction_training_router
@@ -121,6 +123,8 @@ origins = [
     "https://nimasaraeian.com",
     "https://www.nimasaraeian.com",
     "https://nima-ai-marketing.onrender.com",  # Render deployment
+    # Railway deployment: Add your Railway domain here after deploy
+    # Example: "https://your-app-name.up.railway.app"
     "http://localhost:3000",  # DEV: local development
     "http://127.0.0.1:3000",  # DEV: local development
     "http://localhost:8000",  # DEV: local development
@@ -217,6 +221,11 @@ def include_dataset_router(app: FastAPI) -> None:
 include_dataset_router(app)
 app.include_router(image_trust_router, prefix="/api/analyze/image-trust", tags=["image-trust"])
 app.include_router(landing_friction_training_router)
+app.include_router(
+    decision_engine_router,
+    prefix="/api/brain",
+    tags=["Decision Engine"]
+)
 
 
 # ====================================================
@@ -298,6 +307,278 @@ def compute_image_score_from_bytes(data: bytes) -> Optional[float]:
         except Exception:
             # Non-fatal if cleanup fails
             pass
+
+
+async def _analyze_visual_trust_with_vision(
+    image_bytes: bytes,
+    mime_type: str = "image/png"
+) -> VisualTrustResult:
+    """
+    Analyze visual trust using OpenAI Vision API.
+    
+    Args:
+        image_bytes: Raw image bytes
+        mime_type: MIME type of the image
+    
+    Returns:
+        VisualTrustResult with elements and narrative
+    """
+    logger = logging.getLogger("visual_trust")
+    try:
+        # Encode image to base64
+        image_b64 = base64.b64encode(image_bytes).decode("utf-8")
+        data_url = f"data:{mime_type};base64,{image_b64}"
+        
+        # Get OpenAI client
+        from cognitive_friction_engine import get_client, VISUAL_TRUST_SYSTEM_PROMPT
+        client = get_client()
+        
+        # Call Vision API
+        logger.info("Calling OpenAI Vision API for visual trust analysis...")
+        logger.info(f"Image size: {len(image_bytes)} bytes, MIME type: {mime_type}")
+        
+        user_message_content = [
+            {"type": "text", "text": "Analyze this landing page screenshot."},
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": data_url
+                },
+            },
+        ]
+        
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": VISUAL_TRUST_SYSTEM_PROMPT},
+                {
+                    "role": "user",
+                    "content": user_message_content,
+                },
+            ],
+            temperature=0.2,
+            max_tokens=3000,  # Increased to ensure we get enough elements and narrative
+        )
+        
+        # Parse response
+        raw_content = response.choices[0].message.content
+        logger.info(f"[DEBUG] Vision API raw response (first 500 chars): {raw_content[:500]}")
+        logger.info(f"[DEBUG] Vision API raw response length: {len(raw_content)} chars")
+        
+        # Extract JSON (handle markdown code blocks if present)
+        raw_json = raw_content
+        if "```json" in raw_json:
+            logger.debug("Found ```json markdown block, extracting JSON...")
+            raw_json = raw_json.split("```json")[1].split("```")[0].strip()
+        elif "```" in raw_json:
+            logger.debug("Found ``` markdown block, extracting JSON...")
+            raw_json = raw_json.split("```")[1].split("```")[0].strip()
+        
+        logger.info(f"[DEBUG] Extracted JSON (first 500 chars): {raw_json[:500]}")
+        
+        # Parse JSON with error handling
+        try:
+            data = json.loads(raw_json)
+            logger.info(f"[DEBUG] Successfully parsed JSON. Keys: {list(data.keys())}")
+        except json.JSONDecodeError as json_err:
+            logger.error(f"[DEBUG] JSON parsing failed! Error: {json_err}")
+            logger.error(f"[DEBUG] Raw JSON that failed to parse (first 1000 chars): {raw_json[:1000]}")
+            raise json_err
+        
+        # Convert to VisualTrustResult + VisualElement list
+        from cognitive_friction_engine import VisualElement
+        elements = []
+        raw_elements = data.get("elements", [])
+        logger.info(f"[DEBUG] Found {len(raw_elements)} raw elements in response")
+        
+        for idx, e in enumerate(raw_elements):
+            try:
+                element = VisualElement(
+                    id=e.get("id", f"element_{len(elements)}"),
+                    role=e.get("role", "other"),
+                    approx_position=e.get("approx_position", "middle-center"),
+                    text=e.get("text"),
+                    visual_cues=e.get("visual_cues") or [],
+                    analysis=e.get("analysis") or {},
+                )
+                elements.append(element)
+                logger.debug(f"[DEBUG] Successfully parsed element {idx+1}: {element.id} ({element.role})")
+            except Exception as elem_err:
+                logger.warning(f"[DEBUG] Failed to parse element {idx+1}: {e}, error: {elem_err}")
+                continue
+        
+        overall = data.get("overall_visual_trust") or {}
+        narrative = data.get("narrative") or []
+        
+        logger.info(f"[DEBUG] Parsed {len(elements)} elements, {len(narrative)} narrative items")
+        logger.info(f"[DEBUG] Overall trust data: {overall}")
+        
+        # Validate minimum requirements
+        if len(elements) < 3:
+            logger.warning(
+                f"[DEBUG] Insufficient elements: got {len(elements)}, expected at least 3. "
+                f"Raw elements: {raw_elements}"
+            )
+        
+        if len(narrative) < 2:
+            logger.warning(
+                f"[DEBUG] Insufficient narrative: got {len(narrative)}, expected at least 2. "
+                f"Raw narrative: {narrative}"
+            )
+        
+        # Normalize label
+        from typing import Literal
+        label_raw = overall.get("label", "").strip()
+        label: Optional[Literal["Low", "Medium", "High"]] = None
+        if label_raw:
+            label_lower = label_raw.lower()
+            if "low" in label_lower:
+                label = "Low"
+            elif "medium" in label_lower:
+                label = "Medium"
+            elif "high" in label_lower:
+                label = "High"
+        
+        overall_score = overall.get("score")
+        if overall_score is not None:
+            overall_score = float(overall_score)
+            overall_score = max(0.0, min(100.0, overall_score))
+        
+        # Determine status based on data quality
+        status = "ok"
+        notes = None
+        
+        if len(elements) < 3 or len(narrative) < 2:
+            status = "fallback"
+            notes = (
+                f"Visual structure analysis returned insufficient data "
+                f"(elements: {len(elements)}, narrative: {len(narrative)}). "
+                f"This is a partial result."
+            )
+            logger.warning(f"[DEBUG] Setting status to 'fallback' due to insufficient data")
+        
+        result = VisualTrustResult(
+            status=status,
+            label=label,
+            overall_score=overall_score,
+            distribution=None,
+            notes=notes,
+            elements=elements,
+            narrative=narrative,
+        )
+        
+        logger.info(
+            f"Vision API analysis completed: status={status}, label={label}, score={overall_score}, "
+            f"elements={len(elements)}, narrative_items={len(narrative)}"
+        )
+        
+        return result
+        
+    except json.JSONDecodeError as e:
+        logger.error(f"[DEBUG] JSON parsing failed with error: {e}")
+        logger.error(f"[DEBUG] Error at position {e.pos if hasattr(e, 'pos') else 'unknown'}")
+        logger.error(f"[DEBUG] Raw content that failed (first 1000 chars): {raw_content[:1000] if 'raw_content' in locals() else 'N/A'}")
+        return VisualTrustResult(
+            status="fallback",
+            label="Medium",
+            overall_score=60.0,
+            distribution={"low": 0.3, "medium": 0.5, "high": 0.2},
+            notes="Visual structure analysis could not be fully parsed. This is a heuristic fallback.",
+            elements=[],
+            narrative=[
+                "Visual structure analysis could not be fully parsed. This is a heuristic fallback.",
+                "The AI vision model response was not in the expected JSON format."
+            ],
+        )
+    except Exception as e:
+        logger.exception(f"[DEBUG] Vision API visual trust analysis failed: {e}")
+        logger.error(f"[DEBUG] Exception type: {type(e).__name__}")
+        logger.error(f"[DEBUG] Exception details: {str(e)}")
+        import traceback
+        logger.error(f"[DEBUG] Traceback: {traceback.format_exc()}")
+        return VisualTrustResult(
+            status="fallback",
+            label="Medium",
+            overall_score=60.0,
+            distribution={"low": 0.3, "medium": 0.5, "high": 0.2},
+            notes=f"Visual structure analysis could not be fully parsed. Error: {str(e)}. This is a heuristic fallback.",
+            elements=[],
+            narrative=[
+                "Visual structure analysis could not be fully parsed. This is a heuristic fallback.",
+                f"The AI vision model encountered an error: {type(e).__name__}"
+            ],
+        )
+
+
+def _build_visual_trust_result(
+    *,
+    trust_label: Optional[str] = None,
+    trust_scores: Optional[Dict[str, float]] = None,
+    trust_score_numeric: Optional[float] = None,
+    status: str = "unavailable",
+    notes: Optional[str] = None,
+    error: Optional[str] = None,
+) -> VisualTrustResult:
+    """
+    Build a unified VisualTrustResult from various visual trust data sources.
+    
+    Args:
+        trust_label: Trust label from model ("low", "medium", "high")
+        trust_scores: Distribution scores {"low": float, "medium": float, "high": float}
+        trust_score_numeric: Overall numeric score (0-100)
+        status: Status of the analysis ("ok", "fallback", "unavailable")
+        notes: Optional notes explaining the result
+        error: Optional error message
+    
+    Returns:
+        VisualTrustResult object
+    """
+    # Normalize label to proper case
+    label: Optional[str] = None
+    if trust_label:
+        label_lower = trust_label.lower()
+        if label_lower == "low":
+            label = "Low"
+        elif label_lower == "medium":
+            label = "Medium"
+        elif label_lower == "high":
+            label = "High"
+    
+    # Use provided score or calculate from distribution
+    overall_score: Optional[float] = trust_score_numeric
+    if overall_score is None and trust_scores:
+        # Weighted average: low=0-33, medium=34-66, high=67-100
+        low_weight = trust_scores.get("low", 0.0) * 16.5
+        medium_weight = trust_scores.get("medium", 0.0) * 50.0
+        high_weight = trust_scores.get("high", 0.0) * 83.5
+        overall_score = low_weight + medium_weight + high_weight
+    
+    # Normalize distribution to percentages (0-100)
+    distribution: Optional[Dict[str, float]] = None
+    if trust_scores:
+        distribution = {
+            "low": trust_scores.get("low", 0.0) * 100.0,
+            "medium": trust_scores.get("medium", 0.0) * 100.0,
+            "high": trust_scores.get("high", 0.0) * 100.0
+        }
+    
+    # Build notes from error if needed
+    final_notes = notes
+    if error and not final_notes:
+        if "model_missing" in error or "model not found" in error.lower():
+            final_notes = "Visual trust model not loaded on server. Using fallback estimation."
+        elif "fallback" in error.lower():
+            final_notes = "Visual trust model not available. Using fallback estimation."
+        else:
+            final_notes = f"Visual trust analysis encountered an error: {error}"
+    
+    return VisualTrustResult(
+        status=status,
+        label=label,
+        overall_score=overall_score,
+        distribution=distribution,
+        notes=final_notes
+    )
 
 
 def _safe_visual_trust_analysis(
@@ -1087,14 +1368,42 @@ async def cognitive_friction_endpoint(
                 model_override=finetuned_model_id,
             )
 
-            visual_trust_payload = _safe_visual_trust_analysis(
-                image_bytes=image_bytes_raw,
-                image_name=image_filename,
-            )
-            try:
-                result.visual_trust_analysis = VisualTrustAnalysis(**visual_trust_payload)
-            except Exception:
-                logger.warning("Failed to attach visual trust analysis payload", exc_info=True)
+            # Always set visual_trust field, even if no image provided
+            if image_bytes_raw:
+                try:
+                    # Use Vision API for enhanced element-by-element analysis
+                    mime_type = image_mime or "image/png"
+                    result.visual_trust = await _analyze_visual_trust_with_vision(
+                        image_bytes=image_bytes_raw,
+                        mime_type=mime_type
+                    )
+                    
+                    # Also set legacy visual_trust_analysis for backward compatibility
+                    try:
+                        legacy_payload = {
+                            "overall_label": result.visual_trust.label.lower() if result.visual_trust.label else None,
+                            "low_percent": result.visual_trust.distribution.get("low", 0.0) / 100.0 if result.visual_trust.distribution else 0.0,
+                            "medium_percent": result.visual_trust.distribution.get("medium", 0.0) / 100.0 if result.visual_trust.distribution else 0.0,
+                            "high_percent": result.visual_trust.distribution.get("high", 0.0) / 100.0 if result.visual_trust.distribution else 0.0,
+                            "explanation": result.visual_trust.notes or "",
+                            "error": None if result.visual_trust.status == "ok" else result.visual_trust.status
+                        }
+                        result.visual_trust_analysis = VisualTrustAnalysis(**legacy_payload)
+                    except Exception:
+                        logger.warning("Failed to create legacy visual_trust_analysis", exc_info=True)
+                except Exception:
+                    logger.warning("Failed to attach visual trust analysis payload", exc_info=True)
+                    # Set unavailable status on error
+                    result.visual_trust = _build_visual_trust_result(
+                        status="unavailable",
+                        notes="Failed to process visual trust analysis."
+                    )
+            else:
+                # No image provided - set unavailable status
+                result.visual_trust = _build_visual_trust_result(
+                    status="unavailable",
+                    notes="Visual trust analysis was not performed for this landing page."
+                )
 
             psychology_payload: Optional[PsychologyAnalysisResult] = None
             if has_text:
@@ -1317,6 +1626,7 @@ async def psychology_analysis_with_image(
     # Step 2: If image is provided, run visual trust analysis
     visual_trust = None
     visual_layer = None
+    visual_trust_result: Optional[VisualTrustResult] = None
 
     if image is not None:
         project_root = Path(__file__).parent.parent
@@ -1364,6 +1674,15 @@ async def psychology_analysis_with_image(
                 "visual_trust_scores": vt.get("trust_scores", {}),
                 "visual_comment": vt.get("visual_comment", ""),
             }
+            
+            # Build unified VisualTrustResult
+            visual_trust_result = _build_visual_trust_result(
+                trust_label=vt.get("trust_label"),
+                trust_scores=vt.get("trust_scores", {}),
+                trust_score_numeric=vt.get("trust_score_numeric"),
+                status="ok",
+                notes=vt.get("visual_comment")
+            )
         except FileNotFoundError as e:
             # Model not trained or file issue: surface as 400 so user can fix setup
             error_msg = str(e)
@@ -1379,6 +1698,11 @@ async def psychology_analysis_with_image(
                     "visual_trust_score": None,
                     "visual_comment": "Visual trust model is not available. Please train the model first using: python training/train_visual_trust_model.py"
                 }
+                # Build fallback VisualTrustResult
+                visual_trust_result = _build_visual_trust_result(
+                    status="fallback",
+                    notes="Visual trust model not loaded on server. Using fallback estimation."
+                )
             else:
                 raise HTTPException(status_code=400, detail=error_msg)
         except ValueError as e:
@@ -1391,6 +1715,11 @@ async def psychology_analysis_with_image(
                 "visual_trust_score": None,
                 "visual_comment": f"Could not process image: {error_msg}"
             }
+            visual_trust_result = _build_visual_trust_result(
+                status="unavailable",
+                error=error_msg,
+                notes=f"Could not process image: {error_msg}"
+            )
         except Exception as e:
             import traceback
 
@@ -1407,6 +1736,11 @@ async def psychology_analysis_with_image(
                 "visual_trust_score": None,
                 "visual_comment": f"Visual analysis encountered an error: {error_msg}"
             }
+            visual_trust_result = _build_visual_trust_result(
+                status="unavailable",
+                error=error_msg,
+                notes=f"Visual analysis encountered an error: {error_msg}"
+            )
         finally:
             # Clean up temporary file
             try:
@@ -1421,6 +1755,15 @@ async def psychology_analysis_with_image(
         response_payload["visual_trust"] = visual_trust
     if visual_layer is not None:
         response_payload["visual_layer"] = visual_layer
+    # Always set unified visual_trust_result (even if unavailable)
+    if visual_trust_result is not None:
+        response_payload["visual_trust_result"] = visual_trust_result.dict()
+    else:
+        # No image provided - set unavailable status
+        response_payload["visual_trust_result"] = _build_visual_trust_result(
+            status="unavailable",
+            notes="Visual trust analysis was not performed for this landing page."
+        ).dict()
 
     return response_payload
 
@@ -1437,6 +1780,5 @@ async def analyze_with_image(
     Keeps the text-only endpoint intact while adding text+image support.
     """
     return await psychology_analysis_with_image(text=text, image=image)
-
 
 
