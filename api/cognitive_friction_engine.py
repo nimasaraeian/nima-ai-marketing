@@ -28,6 +28,52 @@ from psychology_engine import PsychologyAnalysisResult
 # Load environment variables
 project_root = Path(__file__).parent.parent
 env_file = project_root / ".env"
+
+# Visual Trust Vision System Prompt
+VISUAL_TRUST_SYSTEM_PROMPT = """
+You are a visual landing page analyst.
+
+Goal:
+- Look at the uploaded image as a SaaS landing page.
+- Detect key elements: logo, hero title, subtitle, primary CTA, secondary CTA,
+  hero image, benefit cards, testimonials, trust badges, pricing, etc.
+- For each element, describe:
+  - where it is located (approx_position),
+  - what text it contains (text),
+  - what visual cues it has (visual_cues),
+  - and how it impacts clarity, trust, and motivation (analysis).
+
+CRITICAL: Return ONLY raw JSON. Do not include explanations, markdown, code blocks, or any text outside the JSON object.
+
+You MUST return at least 3 elements and at least 2 narrative sentences.
+
+Return ONLY valid JSON with this structure:
+
+{
+  "overall_visual_trust": {
+    "label": "Low | Medium | High",
+    "score": number
+  },
+  "elements": [
+    {
+      "id": "hero_title",
+      "role": "headline",
+      "approx_position": "top-center",
+      "text": "...",
+      "visual_cues": ["...", "..."],
+      "analysis": {
+        "clarity": "...",
+        "trust_impact": "Low | Medium | High",
+        "notes": "..."
+      }
+    }
+  ],
+  "narrative": [
+    "One-sentence insight 1.",
+    "One-sentence insight 2."
+  ]
+}
+"""
 if env_file.exists():
     load_dotenv(env_file, override=True)
 else:
@@ -218,7 +264,19 @@ def build_platform_context(platform: str) -> str:
 
 COGNITIVE_FRICTION_SYSTEM_PROMPT = """
 
-You are **Cognitive Friction Vision Engine**, an expert behavioral UX + psychology analyst.
+You are **NIMA Cognitive Friction & Conversion Optimizer AI**, an expert behavioral UX + psychology analyst.
+
+GOAL:
+- Analyze a landing page (copy + optional image description).
+- Diagnose psychological friction, trust gaps, and decision blockers.
+- Then generate CLEAR, ACTIONABLE "Next Better Actions" that a marketer can apply immediately.
+
+GLOBAL RULES:
+- Do NOT give generic advice like "improve clarity" or "add more details".
+- Always point to a specific section or phrase on the page.
+- Always explain the psychological reason (e.g., ambiguity, overload, low proof, weak urgency, low emotional relevance).
+- Always give a concrete example of improved copy or structure.
+- Prioritize actions by real impact on conversion, not by design beauty.
 
 You receive:
 - A landing page screenshot (image of the full page or hero section).
@@ -229,6 +287,7 @@ Your job:
 - Detect which exact visual and textual elements create cognitive friction.
 - Explain *where* the problem is, *why* it is a problem psychologically, and *how* to fix it.
 - Always connect issues to psychological pillars: clarity, trust, emotion, motivation, overload, and ambiguity.
+- Generate 3-5 specific, actionable "next_better_actions" with concrete examples.
 
 ========================
 1) PAGE STRUCTURE RECONSTRUCTION
@@ -383,6 +442,117 @@ In the explanation text (if available in the UI):
   - Be specific, concrete, and example-driven.
   - Refer to elements using the names like "hero_title", "hero_image", "primary_cta", "trust_badges", etc.
 - Never say "no issues" or "no critical risks" unless the page is truly excellent. Even then, highlight at least one micro-improvement opportunity.
+
+========================
+9) 7-FACTOR BEHAVIORAL SCORES
+========================
+
+In addition to the main analysis, you MUST also provide a "behavior_factors" array with exactly 7 factors:
+
+{
+  "behavior_factors": [
+    {
+      "name": "clarity",
+      "score": 0-100,
+      "short_reason": "One sentence, decision-focused reason (e.g., 'Headline is clear but outcome is vague', not 'Clarity is good')."
+    },
+    {
+      "name": "trust",
+      "score": 0-100,
+      "short_reason": "..."
+    },
+    {
+      "name": "cognitive_effort",
+      "score": 0-100,
+      "short_reason": "..."
+    },
+    {
+      "name": "motivation",
+      "score": 0-100,
+      "short_reason": "..."
+    },
+    {
+      "name": "risk",
+      "score": 0-100,
+      "short_reason": "..."
+    },
+    {
+      "name": "memorability",
+      "score": 0-100,
+      "short_reason": "..."
+    },
+    {
+      "name": "decision_simplicity",
+      "score": 0-100,
+      "short_reason": "..."
+    }
+  ]
+}
+
+Factor definitions:
+- clarity: How clear and understandable is the value proposition?
+- trust: How credible and trustworthy does the page appear?
+- cognitive_effort: How much mental work is required to understand and decide? (Lower is better)
+- motivation: How strong is the motivation to take action?
+- risk: How risky does the action feel? (Lower is better)
+- memorability: How memorable and distinctive is the message?
+- decision_simplicity: How simple and clear is the path to conversion?
+
+For each factor:
+- score: 0-100 (0-49 = low, 50-74 = medium, 75-100 = high)
+- short_reason: Must be decision-focused, specific, and actionable. No generic praise.
+
+========================
+10) NEXT BETTER ACTIONS (REQUIRED - MOST IMPORTANT OUTPUT)
+========================
+
+You MUST provide a "next_better_actions" array with at least 3 and at most 5 actions.
+
+Each action must be:
+- Concrete: Points to a specific section/element (hero_title, primary_cta, social_proof, form, trust_badges, etc.)
+- Actionable: Provides a concrete example of improved copy or structural change
+- Prioritized: Ranked by real impact on conversion (priority_rank: 1 = do first)
+- Complete: All fields must be filled
+
+Format:
+{
+  "next_better_actions": [
+    {
+      "id": 1,
+      "title": "Make the hero title outcome-specific",
+      "target_section": "hero_title",
+      "psychology_label": "Cognitive Friction – Abstract Value Proposition",
+      "problem_summary": "The current hero title sounds impressive but does not say what the AI measures or how it helps the user make better decisions.",
+      "suggested_change": "Example: 'AI engine that scores your landing page on 13 psychology pillars and shows you exactly what to fix for higher conversions.'",
+      "impact_score": 92,
+      "difficulty": 2,
+      "priority_rank": 1
+    },
+    {
+      "id": 2,
+      "title": "Add at least one hard proof element",
+      "target_section": "trust_section",
+      "psychology_label": "Trust Gap – No Evidence",
+      "problem_summary": "The page visually looks trustworthy but offers no numbers, logos, or screenshots as proof.",
+      "suggested_change": "Add a section like: 'Trusted by 120+ marketers' with 3–5 logos, or show a mini screenshot of the real dashboard with a sample score.",
+      "impact_score": 88,
+      "difficulty": 3,
+      "priority_rank": 2
+    }
+    // ... 1-3 more actions
+  ]
+}
+
+REQUIREMENTS FOR next_better_actions:
+- Always return at least 3 and at most 5 actions.
+- Each action MUST be unique and focus on a different angle (e.g., clarity, proof, urgency, emotional resonance, structure).
+- Each suggested_change MUST contain at least one concrete example sentence or structural change.
+- Use simple, direct language. Write for marketers, not academics.
+- Never leave any field empty.
+- priority_rank must be unique (1, 2, 3, etc.) and sequential.
+- target_section must be a real element name (hero_title, hero_subtitle, primary_cta, secondary_cta, nav_bar, trust_badges, social_proof_section, benefits_section, pricing_section, form_area, hero_image, etc.)
+- impact_score: 1-100 (higher = more impact on conversion)
+- difficulty: 1-5 (1 = easy, 5 = very hard)
 """
 
 MODULE_SUMMARY = """
@@ -548,8 +718,171 @@ class AIRecommendationItem(BaseModel):
     )
 
 
+class VisualElement(BaseModel):
+    """Individual visual element detected in a landing page image."""
+    
+    id: str = Field(..., description="Unique identifier for the element (e.g., 'hero_title', 'primary_cta').")
+    role: Literal[
+        "logo",
+        "headline",
+        "subheadline",
+        "primary_cta",
+        "secondary_cta",
+        "benefit_card",
+        "testimonial",
+        "trust_badge",
+        "pricing_block",
+        "hero_image",
+        "other"
+    ] = Field(..., description="Type/role of the visual element.")
+    approx_position: Literal[
+        "top-left", "top-center", "top-right",
+        "middle-left", "middle-center", "middle-right",
+        "bottom-left", "bottom-center", "bottom-right"
+    ] = Field(..., description="Approximate position of the element on the page.")
+    text: Optional[str] = Field(
+        default=None,
+        description="Text content of the element (if applicable)."
+    )
+    visual_cues: List[str] = Field(
+        default_factory=list,
+        description="List of visual cues describing the element (colors, size, style, etc.)."
+    )
+    analysis: Dict[str, Any] = Field(
+        default_factory=dict,
+        description="Analysis of the element's impact on clarity, trust, and motivation."
+    )
+
+
+# ====================================================
+# 7-FACTOR BEHAVIORAL MODEL
+# ====================================================
+
+BehaviorFactorName = Literal[
+    "clarity",
+    "trust",
+    "cognitive_effort",
+    "motivation",
+    "risk",
+    "memorability",
+    "decision_simplicity",
+]
+
+
+class NextBetterAction(BaseModel):
+    """A concrete, actionable improvement recommendation for the landing page."""
+    
+    id: int = Field(..., description="Unique identifier for this action.")
+    title: str = Field(..., description="Short, descriptive title (e.g., 'Fix the hero title specificity').")
+    target_section: str = Field(..., description="Specific section/element name (e.g., 'hero_title', 'primary_cta', 'social_proof', 'form').")
+    psychology_label: str = Field(..., description="Psychological category label (e.g., 'Trust Gap – No Proof', 'Cognitive Friction – Ambiguity').")
+    problem_summary: str = Field(..., description="1-2 sentences explaining the exact problem.")
+    suggested_change: str = Field(..., description="Concrete suggestion with example copy or structural change.")
+    impact_score: int = Field(..., ge=1, le=100, description="Expected impact on conversion (1-100).")
+    difficulty: int = Field(..., ge=1, le=5, description="Implementation difficulty (1=easy, 5=hard).")
+    priority_rank: int = Field(..., ge=1, description="Priority order (1 = highest priority, should be done first).")
+
+
+class BehaviorFactorScore(BaseModel):
+    """Score for a single behavioral factor."""
+    
+    name: BehaviorFactorName = Field(..., description="Name of the behavioral factor.")
+    score: float = Field(..., ge=0, le=100, description="Score from 0-100.")
+    level: Literal["low", "medium", "high"] = Field(..., description="Level based on score.")
+    short_reason: str = Field(..., description="One sentence reason, decision-focused.")
+
+
+class BehaviorDiagnosis(BaseModel):
+    """Diagnosis derived from the 7 behavioral factors."""
+    
+    overall_readiness: Literal["high", "medium", "low"] = Field(
+        ...,
+        description="Overall conversion readiness assessment."
+    )
+    summary_sentence: str = Field(
+        ...,
+        description="One sentence summary including at least one weakness if not 'high'."
+    )
+    strongest_driver: BehaviorFactorScore = Field(
+        ...,
+        description="The factor that most strongly drives conversion."
+    )
+    primary_blocker: BehaviorFactorScore = Field(
+        ...,
+        description="The factor that most blocks conversion."
+    )
+    hidden_risk: Optional[BehaviorFactorScore] = Field(
+        default=None,
+        description="Optional hidden risk factor (risk/trust/memorability < 60)."
+    )
+    quick_win: Optional[BehaviorFactorScore] = Field(
+        default=None,
+        description="Optional quick win opportunity (score 50-70, high impact factor)."
+    )
+
+
+class BehaviorRecommendation(BaseModel):
+    """A single behavioral recommendation."""
+    
+    title: str = Field(..., description="Short imperative title (e.g., 'Strengthen trust signals').")
+    description: str = Field(..., description="One sentence: what to change + why it matters.")
+    target_factors: List[BehaviorFactorName] = Field(
+        ...,
+        description="List of behavioral factors this recommendation targets."
+    )
+
+
+class BehaviorRecommendationSet(BaseModel):
+    """Set of behavioral recommendations."""
+    
+    primary: BehaviorRecommendation = Field(..., description="Primary recommendation targeting the main blocker.")
+    secondary: List[BehaviorRecommendation] = Field(
+        default_factory=list,
+        description="Secondary recommendations (0-2 items, from hidden_risk and quick_win)."
+    )
+
+
+class VisualTrustResult(BaseModel):
+    """
+    Unified visual trust result model used across all endpoints.
+    
+    This model provides a consistent structure for visual trust analysis results,
+    with explicit status tracking (ok, fallback, unavailable) to prevent UI inconsistencies.
+    """
+    status: Literal["ok", "fallback", "unavailable"] = Field(
+        ...,
+        description="Status of the visual trust analysis: 'ok' (real model result), 'fallback' (estimated), 'unavailable' (not performed)."
+    )
+    label: Optional[Literal["Low", "Medium", "High"]] = Field(
+        default=None,
+        description="Overall trust label (Low/Medium/High). Only set when status is 'ok' or 'fallback'."
+    )
+    overall_score: Optional[float] = Field(
+        default=None,
+        ge=0,
+        le=100,
+        description="Overall trust score (0-100). Only set when status is 'ok' or 'fallback'."
+    )
+    distribution: Optional[Dict[str, float]] = Field(
+        default=None,
+        description="Trust distribution percentages: {'low': float, 'medium': float, 'high': float}. Only set when status is 'ok' or 'fallback'."
+    )
+    notes: Optional[str] = Field(
+        default=None,
+        description="Optional notes explaining the result, especially for 'fallback' or 'unavailable' status."
+    )
+    elements: List[VisualElement] = Field(
+        default_factory=list,
+        description="List of detected visual elements with their analysis."
+    )
+    narrative: List[str] = Field(
+        default_factory=list,
+        description="One-sentence insights about the visual trust analysis."
+    )
+
+
 class VisualTrustAnalysis(BaseModel):
-    """Structured visual trust output."""
+    """Structured visual trust output (legacy format, kept for backward compatibility)."""
 
     overall_label: Optional[str] = Field(
         default=None, description="Overall trust classification (Low/Medium/High)."
@@ -642,7 +975,11 @@ class CognitiveFrictionResult(BaseModel):
     )
     visual_trust_analysis: Optional[VisualTrustAnalysis] = Field(
         default=None,
-        description="Structured visual trust evaluation for accompanying imagery.",
+        description="Structured visual trust evaluation for accompanying imagery (legacy format).",
+    )
+    visual_trust: Optional[VisualTrustResult] = Field(
+        default=None,
+        description="Unified visual trust result with explicit status (ok/fallback/unavailable). Always set when image is provided.",
     )
     psychology_narrative: Optional[PsychologyNarrative] = Field(
         default=None,
@@ -655,6 +992,22 @@ class CognitiveFrictionResult(BaseModel):
     visual_trust_score: Optional[float] = Field(
         default=None,
         description="Optional numeric trust score from the visual trust engine (0-100).",
+    )
+    behavior_factors: Optional[List[BehaviorFactorScore]] = Field(
+        default=None,
+        description="7-factor behavioral scores (clarity, trust, cognitive_effort, motivation, risk, memorability, decision_simplicity)."
+    )
+    behavior_diagnosis: Optional[BehaviorDiagnosis] = Field(
+        default=None,
+        description="Behavioral diagnosis derived from the 7 factors (readiness, driver, blocker, risks)."
+    )
+    behavior_recommendations: Optional[BehaviorRecommendationSet] = Field(
+        default=None,
+        description="Behavioral recommendations (primary + secondary) targeting the main blockers."
+    )
+    next_better_actions: List[NextBetterAction] = Field(
+        default_factory=list,
+        description="3-5 concrete, actionable improvement recommendations with specific examples and priorities."
     )
 
 
@@ -1219,6 +1572,406 @@ def _normalize_result_payload(raw_payload: Dict[str, Any]) -> Dict[str, Any]:
 
 
 # ====================================================
+# 7-FACTOR BEHAVIORAL MODEL HELPERS
+# ====================================================
+
+
+def build_next_better_actions(json_data: Dict[str, Any]) -> List[NextBetterAction]:
+    """
+    Build NextBetterAction list from LLM JSON response.
+    
+    Args:
+        json_data: Dictionary with "next_better_actions" or "nextBetterActions" key
+    
+    Returns:
+        List of NextBetterAction objects, at least 3 and at most 5
+    """
+    actions_data = json_data.get("next_better_actions") or json_data.get("nextBetterActions", [])
+    
+    if not isinstance(actions_data, list):
+        logger.warning(f"Expected 'next_better_actions' to be a list, got {type(actions_data)}")
+        actions_data = []
+    
+    actions = []
+    seen_ids = set()
+    
+    for action_data in actions_data:
+        try:
+            # Validate required fields
+            if not isinstance(action_data, dict):
+                logger.warning(f"Invalid action data type: {type(action_data)}, skipping")
+                continue
+            
+            action_id = int(action_data.get("id", 0))
+            if action_id == 0 or action_id in seen_ids:
+                logger.warning(f"Invalid or duplicate action id: {action_id}, skipping")
+                continue
+            
+            seen_ids.add(action_id)
+            
+            # Extract and validate fields
+            title = str(action_data.get("title", "")).strip()
+            target_section = str(action_data.get("target_section") or action_data.get("targetSection", "")).strip()
+            psychology_label = str(action_data.get("psychology_label") or action_data.get("psychologyLabel", "")).strip()
+            problem_summary = str(action_data.get("problem_summary") or action_data.get("problemSummary", "")).strip()
+            suggested_change = str(action_data.get("suggested_change") or action_data.get("suggestedChange", "")).strip()
+            impact_score = int(action_data.get("impact_score") or action_data.get("impactScore", 50))
+            difficulty = int(action_data.get("difficulty", 3))
+            priority_rank = int(action_data.get("priority_rank") or action_data.get("priorityRank", action_id))
+            
+            # Clamp values to valid ranges
+            impact_score = max(1, min(100, impact_score))
+            difficulty = max(1, min(5, difficulty))
+            priority_rank = max(1, priority_rank)
+            
+            # Validate required fields are not empty
+            if not all([title, target_section, psychology_label, problem_summary, suggested_change]):
+                logger.warning(f"Action {action_id} missing required fields, skipping")
+                continue
+            
+            action = NextBetterAction(
+                id=action_id,
+                title=title,
+                target_section=target_section,
+                psychology_label=psychology_label,
+                problem_summary=problem_summary,
+                suggested_change=suggested_change,
+                impact_score=impact_score,
+                difficulty=difficulty,
+                priority_rank=priority_rank
+            )
+            actions.append(action)
+        except Exception as e:
+            logger.warning(f"Failed to parse action: {action_data}, error: {e}")
+            continue
+    
+    # Sort by priority_rank
+    actions.sort(key=lambda a: a.priority_rank)
+    
+    # Ensure we have at least 3 actions (create defaults if needed)
+    if len(actions) < 3:
+        logger.warning(f"Only {len(actions)} actions found, expected at least 3. Creating default actions.")
+        existing_titles = {a.title.lower() for a in actions}
+        existing_ranks = {a.priority_rank for a in actions}
+        
+        default_actions = [
+            {
+                "title": "Improve hero headline clarity",
+                "target_section": "hero_title",
+                "psychology_label": "Cognitive Friction – Ambiguity",
+                "problem_summary": "The hero headline may be too abstract or vague.",
+                "suggested_change": "Make the headline more specific about the outcome (e.g., 'AI that shows you exactly why visitors don't convert')."
+            },
+            {
+                "title": "Add social proof elements",
+                "target_section": "social_proof_section",
+                "psychology_label": "Trust Gap – No Proof",
+                "problem_summary": "Lack of visible trust signals reduces credibility.",
+                "suggested_change": "Add customer testimonials, logos, or case study numbers near the primary CTA."
+            },
+            {
+                "title": "Strengthen primary CTA",
+                "target_section": "primary_cta",
+                "psychology_label": "Motivation Gap – Weak Urgency",
+                "problem_summary": "The call-to-action may not create enough motivation to act.",
+                "suggested_change": "Use action-oriented, benefit-focused CTA text (e.g., 'Get Your Free Analysis' instead of 'Learn More')."
+            }
+        ]
+        
+        for default_action in default_actions:
+            if default_action["title"].lower() not in existing_titles:
+                # Find next available rank
+                next_rank = max(existing_ranks, default=0) + 1
+                existing_ranks.add(next_rank)
+                
+                action = NextBetterAction(
+                    id=next_rank,
+                    title=default_action["title"],
+                    target_section=default_action["target_section"],
+                    psychology_label=default_action["psychology_label"],
+                    problem_summary=default_action["problem_summary"],
+                    suggested_change=default_action["suggested_change"],
+                    impact_score=70,
+                    difficulty=2,
+                    priority_rank=next_rank
+                )
+                actions.append(action)
+                
+                if len(actions) >= 3:
+                    break
+    
+    # Limit to 5 actions max
+    actions = actions[:5]
+    
+    # Re-assign priority_rank sequentially to ensure no gaps
+    for idx, action in enumerate(actions, 1):
+        action.priority_rank = idx
+    
+    return actions
+
+
+def build_behavior_factors(json_data: Dict[str, Any]) -> List[BehaviorFactorScore]:
+    """
+    Build BehaviorFactorScore list from LLM JSON response.
+    
+    Args:
+        json_data: Dictionary with "factors" key containing list of factor objects
+    
+    Returns:
+        List of BehaviorFactorScore objects
+    """
+    factors_data = json_data.get("factors", [])
+    if not isinstance(factors_data, list):
+        logger.warning(f"Expected 'factors' to be a list, got {type(factors_data)}")
+        return []
+    
+    valid_factor_names = {
+        "clarity", "trust", "cognitive_effort", "motivation",
+        "risk", "memorability", "decision_simplicity"
+    }
+    
+    factors = []
+    for factor_data in factors_data:
+        try:
+            name = factor_data.get("name", "").strip()
+            if name not in valid_factor_names:
+                logger.warning(f"Invalid factor name: {name}, skipping")
+                continue
+            
+            score = float(factor_data.get("score", 0))
+            score = max(0.0, min(100.0, score))  # Clamp to 0-100
+            
+            # Map score to level
+            if score < 50:
+                level: Literal["low", "medium", "high"] = "low"
+            elif score < 75:
+                level = "medium"
+            else:
+                level = "high"
+            
+            short_reason = factor_data.get("short_reason", "").strip()
+            if not short_reason:
+                short_reason = f"{name} score is {score:.0f}"
+            
+            factor = BehaviorFactorScore(
+                name=name,  # type: ignore
+                score=score,
+                level=level,
+                short_reason=short_reason
+            )
+            factors.append(factor)
+        except Exception as e:
+            logger.warning(f"Failed to parse factor: {factor_data}, error: {e}")
+            continue
+    
+    # Ensure we have all 7 factors (fill missing ones with defaults)
+    existing_names = {f.name for f in factors}
+    for required_name in valid_factor_names:
+        if required_name not in existing_names:
+            logger.warning(f"Missing factor {required_name}, adding default")
+            factors.append(BehaviorFactorScore(
+                name=required_name,  # type: ignore
+                score=50.0,
+                level="medium",
+                short_reason=f"{required_name} was not evaluated"
+            ))
+    
+    # Sort by name for consistency
+    factors.sort(key=lambda f: f.name)
+    return factors
+
+
+def diagnose_behavior(factors: List[BehaviorFactorScore]) -> BehaviorDiagnosis:
+    """
+    Derive diagnosis from 7 behavioral factor scores.
+    
+    Args:
+        factors: List of 7 BehaviorFactorScore objects
+    
+    Returns:
+        BehaviorDiagnosis with overall_readiness, driver, blocker, risks, quick_win
+    """
+    if len(factors) != 7:
+        logger.warning(f"Expected 7 factors, got {len(factors)}")
+    
+    # Find strongest_driver: highest score among "high" level factors
+    # Prefer clarity/trust/motivation if tied
+    high_factors = [f for f in factors if f.level == "high"]
+    if high_factors:
+        # Sort by score descending, then by preference (lower preference number = higher priority)
+        preference_order = {"clarity": 0, "trust": 1, "motivation": 2}
+        high_factors.sort(
+            key=lambda f: (-f.score, preference_order.get(f.name, 99))
+        )
+        strongest_driver = high_factors[0]  # Highest score, highest preference
+    else:
+        # No high factors, use highest score overall
+        strongest_driver = max(factors, key=lambda f: f.score)
+    
+    # Find primary_blocker: lowest score
+    # If tied, prefer trust > risk > motivation
+    blocker_candidates = [f for f in factors if f.score == min(f.score for f in factors)]
+    blocker_preference = {"trust": 0, "risk": 1, "motivation": 2}
+    blocker_candidates.sort(key=lambda f: blocker_preference.get(f.name, 99))
+    primary_blocker = blocker_candidates[0]
+    
+    # Find hidden_risk: if risk < 60 OR trust < 60 OR memorability < 60
+    risk_factors = [
+        f for f in factors
+        if f.name in ("risk", "trust", "memorability") and f.score < 60
+    ]
+    hidden_risk = None
+    if risk_factors:
+        hidden_risk = min(risk_factors, key=lambda f: f.score)
+    
+    # Find quick_win: score 50-70, high impact (motivation > memorability > clarity > trust)
+    quick_win_candidates = [
+        f for f in factors
+        if 50 <= f.score <= 70 and f.name in ("motivation", "memorability", "clarity", "trust")
+    ]
+    quick_win = None
+    if quick_win_candidates:
+        quick_win_preference = {"motivation": 0, "memorability": 1, "clarity": 2, "trust": 3}
+        quick_win_candidates.sort(key=lambda f: quick_win_preference.get(f.name, 99))
+        quick_win = quick_win_candidates[0]
+    
+    # Calculate overall_readiness using weighted composite
+    weights = {
+        "clarity": 1.0,
+        "trust": 1.2,
+        "cognitive_effort": -1.0,  # lower is better
+        "motivation": 1.0,
+        "risk": -1.1,  # lower risk is better
+        "memorability": 0.8,
+        "decision_simplicity": 0.8,
+    }
+    
+    composite = 0.0
+    for factor in factors:
+        weight = weights.get(factor.name, 1.0)
+        if factor.name in ("cognitive_effort", "risk"):
+            # Invert: lower score is better
+            composite += weight * (100 - factor.score)
+        else:
+            composite += weight * factor.score
+    
+    # Normalize composite (divide by sum of absolute weights)
+    total_weight = sum(abs(w) for w in weights.values())
+    composite = composite / total_weight if total_weight > 0 else 50.0
+    
+    # Determine overall_readiness
+    trust_factor = next((f for f in factors if f.name == "trust"), None)
+    clarity_factor = next((f for f in factors if f.name == "clarity"), None)
+    motivation_factor = next((f for f in factors if f.name == "motivation"), None)
+    
+    if (trust_factor and trust_factor.score < 50) or \
+       (clarity_factor and clarity_factor.score < 50) or \
+       (motivation_factor and motivation_factor.score < 50):
+        overall_readiness: Literal["high", "medium", "low"] = "low"
+    elif composite >= 75 and all(f.score >= 60 for f in factors):
+        overall_readiness = "high"
+    else:
+        overall_readiness = "medium"
+    
+    # Build summary_sentence
+    weakness = primary_blocker
+    if hidden_risk and hidden_risk.score < weakness.score:
+        weakness = hidden_risk
+    
+    readiness_text = {
+        "high": "high",
+        "medium": "medium",
+        "low": "low"
+    }[overall_readiness]
+    
+    summary_sentence = (
+        f"Conversion readiness is {readiness_text}: "
+        f"{weakness.short_reason.lower()}"
+    )
+    
+    return BehaviorDiagnosis(
+        overall_readiness=overall_readiness,
+        summary_sentence=summary_sentence,
+        strongest_driver=strongest_driver,
+        primary_blocker=primary_blocker,
+        hidden_risk=hidden_risk,
+        quick_win=quick_win
+    )
+
+
+def build_behavior_recommendations(
+    factors: List[BehaviorFactorScore],
+    diagnosis: BehaviorDiagnosis
+) -> BehaviorRecommendationSet:
+    """
+    Build behavioral recommendations from factors and diagnosis.
+    
+    Args:
+        factors: List of 7 BehaviorFactorScore objects
+        diagnosis: BehaviorDiagnosis object
+    
+    Returns:
+        BehaviorRecommendationSet with primary and secondary recommendations
+    """
+    # Primary recommendation targets primary_blocker
+    blocker = diagnosis.primary_blocker
+    
+    title_map = {
+        "clarity": "Improve clarity",
+        "trust": "Strengthen trust signals",
+        "cognitive_effort": "Reduce cognitive effort",
+        "motivation": "Increase motivation",
+        "risk": "Reduce perceived risk",
+        "memorability": "Increase memorability",
+        "decision_simplicity": "Simplify decision path"
+    }
+    
+    description_map = {
+        "clarity": f"Make the value proposition and outcome clearer to reduce {blocker.short_reason.lower()}",
+        "trust": f"Add trust signals and proof to address {blocker.short_reason.lower()}",
+        "cognitive_effort": f"Simplify the page structure and messaging to reduce {blocker.short_reason.lower()}",
+        "motivation": f"Strengthen the value proposition and urgency to address {blocker.short_reason.lower()}",
+        "risk": f"Add guarantees, refunds, or risk-reversal elements to address {blocker.short_reason.lower()}",
+        "memorability": f"Make the message more distinctive and memorable to address {blocker.short_reason.lower()}",
+        "decision_simplicity": f"Streamline the conversion path to address {blocker.short_reason.lower()}"
+    }
+    
+    primary = BehaviorRecommendation(
+        title=title_map.get(blocker.name, f"Improve {blocker.name}"),
+        description=description_map.get(blocker.name, f"Address {blocker.short_reason.lower()}"),
+        target_factors=[blocker.name]  # type: ignore
+    )
+    
+    # Secondary recommendations from hidden_risk and quick_win
+    secondary = []
+    
+    if diagnosis.hidden_risk and diagnosis.hidden_risk.name != blocker.name:
+        risk = diagnosis.hidden_risk
+        secondary.append(BehaviorRecommendation(
+            title=title_map.get(risk.name, f"Address {risk.name} risk"),
+            description=description_map.get(risk.name, f"Mitigate {risk.short_reason.lower()}"),
+            target_factors=[risk.name]  # type: ignore
+        ))
+    
+    if diagnosis.quick_win and diagnosis.quick_win.name != blocker.name:
+        win = diagnosis.quick_win
+        if not any(r.target_factors[0] == win.name for r in secondary):
+            secondary.append(BehaviorRecommendation(
+                title=title_map.get(win.name, f"Optimize {win.name}"),
+                description=description_map.get(win.name, f"Quick improvement: {win.short_reason.lower()}"),
+                target_factors=[win.name]  # type: ignore
+            ))
+    
+    # Limit to 2 secondary recommendations
+    secondary = secondary[:2]
+    
+    return BehaviorRecommendationSet(
+        primary=primary,
+        secondary=secondary
+    )
+
+
+# ====================================================
 # MAIN ANALYSIS FUNCTION
 # ====================================================
 
@@ -1287,6 +2040,18 @@ def analyze_cognitive_friction(
         raise InvalidAIResponseError("Model response was not valid JSON.", raw_output) from exc
 
     normalized = _normalize_result_payload(payload)
+    
+    # Remove behavior_factors from normalized if present, since we build it properly later
+    # The raw data from LLM doesn't have the 'level' field required by BehaviorFactorScore
+    normalized.pop("behavior_factors", None)
+    normalized.pop("behaviorFactors", None)
+    
+    # For next_better_actions, we need to provide an empty list as placeholder
+    # because Pydantic v2 requires the field to be present in the dict
+    # We'll rebuild it properly after creating the result object
+    normalized.pop("next_better_actions", None)
+    normalized.pop("nextBetterActions", None)
+    normalized["next_better_actions"] = []  # Placeholder empty list
 
     result = CognitiveFrictionResult(**normalized)
     result.raw_model_output = raw_output
@@ -1302,6 +2067,45 @@ def analyze_cognitive_friction(
             friction_score=result.frictionScore,
             trust_score=result.trustScore,
         )
+
+    # Build 7-factor behavioral model
+    try:
+        behavior_factors_data = payload.get("behavior_factors") or payload.get("behaviorFactors")
+        if behavior_factors_data:
+            # build_behavior_factors expects {"factors": [...]}
+            behavior_factors = build_behavior_factors({"factors": behavior_factors_data})
+            if len(behavior_factors) == 7:
+                result.behavior_factors = behavior_factors
+                
+                # Build diagnosis
+                diagnosis = diagnose_behavior(behavior_factors)
+                result.behavior_diagnosis = diagnosis
+                
+                # Build recommendations
+                recommendations = build_behavior_recommendations(behavior_factors, diagnosis)
+                result.behavior_recommendations = recommendations
+                
+                logger.info(
+                    f"Behavioral analysis completed: readiness={diagnosis.overall_readiness}, "
+                    f"driver={diagnosis.strongest_driver.name}, blocker={diagnosis.primary_blocker.name}"
+                )
+            else:
+                logger.warning(f"Expected 7 behavior factors, got {len(behavior_factors)}")
+        else:
+            logger.info("No behavior_factors in LLM response, skipping behavioral analysis")
+    except Exception as e:
+        logger.warning(f"Failed to build behavioral analysis: {e}", exc_info=True)
+        # Don't fail the entire request if behavioral analysis fails
+
+    # Build next_better_actions (required field, must always be populated)
+    try:
+        next_better_actions = build_next_better_actions(payload)
+        result.next_better_actions = next_better_actions
+        logger.info(f"Next better actions built: {len(next_better_actions)} actions")
+    except Exception as e:
+        logger.error(f"Failed to build next_better_actions: {e}", exc_info=True)
+        # This field must always have at least 3 actions - create defaults if build failed
+        result.next_better_actions = build_next_better_actions({})  # Will create default actions
 
     return result
 

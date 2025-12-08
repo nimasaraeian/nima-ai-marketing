@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Decision Engine v1 - Demo</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .decision-demo {
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 2rem;
+        }
+        .url-hint {
+            font-size: 0.9rem;
+            color: #666;
+            margin-top: 0.5rem;
+        }
+        .result-card {
+            background: #f5f5f5;
+            padding: 1.5rem;
+            border-radius: 8px;
+            margin-top: 2rem;
+        }
+        .result-field {
+            margin: 1rem 0;
+        }
+        .result-label {
+            font-weight: 600;
+            color: #333;
+        }
+        .result-value {
+            margin-top: 0.5rem;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="decision-demo">
+        <h1>Decision Engine v1</h1>
+        <p>Diagnoses ONE decision failure and outputs ONE concrete fix.</p>
+        
+        <form id="decisionForm" onsubmit="submitDecision(event)">
+            <div class="form-group">
+                <label class="form-label" for="contentInput">
+                    Landing Page Content
+                </label>
+                <textarea 
+                    id="contentInput" 
+                    class="form-textarea" 
+                    name="content" 
+                    placeholder="Paste the page content (headline, CTA, price, guarantee) OR a URL.&#10;&#10;Example:&#10;Premium Product XYZ&#10;Add to Cart&#10;Price: 299.99 TL&#10;30-day money-back guarantee"
+                    required
+                    rows="8"
+                ></textarea>
+                <div class="url-hint">
+                    <strong>💡 Best Practice:</strong> Manually copy and paste the content from the page:<br>
+                    • Hero headline • CTA button text • Price • Guarantee/refund info<br><br>
+                    <strong>⚠️ URL Note:</strong> You can paste a URL, but many sites (Trendyol, Amazon, etc.) block automated access. 
+                    If you get timeout or 403 errors, <strong>paste the content manually</strong> instead.
+                </div>
+            </div>
+            
+            <div style="display: flex; gap: 1rem; margin-top: 2rem;">
+                <button type="submit" class="btn btn-primary" style="flex: 1;">Analyze Decision Failure</button>
+                <button type="button" class="btn btn-secondary" onclick="clearForm()" style="flex: 1;">Clear</button>
+            </div>
+        </form>
+        
+        <div id="loadingIndicator" style="display: none; text-align: center; margin: 2rem 0;">
+            <p>Analyzing decision failure...</p>
+        </div>
+        
+        <div id="errorMessage" style="display: none; background: #fee; padding: 1rem; border-radius: 8px; margin-top: 2rem; color: #c00;"></div>
+        
+        <div id="resultContainer" style="display: none;"></div>
+    </div>
+    
+    <script>
+        const API_BASE_URL = 'http://127.0.0.1:8000';
+        
+        async function submitDecision(event) {
+            event.preventDefault();
+            
+            const contentInput = document.getElementById('contentInput');
+            const content = contentInput.value.trim();
+            
+            if (!content) {
+                alert('Please enter content or URL');
+                return;
+            }
+            
+            // Show loading
+            document.getElementById('loadingIndicator').style.display = 'block';
+            document.getElementById('errorMessage').style.display = 'none';
+            document.getElementById('resultContainer').style.display = 'none';
+            
+            try {
+                const response = await fetch(`${API_BASE_URL}/api/brain/decision-engine`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        content: content,
+                        url: null  // URL will be auto-detected from content if it starts with http
+                    })
+                });
+                
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.detail || `HTTP ${response.status}`);
+                }
+                
+                const result = await response.json();
+                displayResult(result);
+                
+            } catch (error) {
+                let errorMsg = error.message;
+                // Parse error from response if available
+                if (error.message && (error.message.includes('403') || error.message.includes('Forbidden'))) {
+                    errorMsg = 'This website blocks automated access (403 Forbidden). Please paste the page content manually, including headline, CTA, price, and guarantee information.';
+                } else if (error.message && (error.message.includes('timeout') || error.message.includes('timed out'))) {
+                    errorMsg = 'Request timed out. The website may be slow or blocking requests. Please manually copy and paste the page content (headline, CTA, price, guarantee) instead of using the URL.';
+                } else if (error.message && error.message.includes('does not expose enough decision-critical')) {
+                    errorMsg = 'This page doesn\'t have enough decision-critical elements. Please paste the content manually, including at least: headline, CTA, and price/guarantee information.';
+                }
+                document.getElementById('errorMessage').textContent = `Error: ${errorMsg}`;
+                document.getElementById('errorMessage').style.display = 'block';
+            } finally {
+                document.getElementById('loadingIndicator').style.display = 'none';
+            }
+        }
+        
+        function displayResult(result) {
+            const container = document.getElementById('resultContainer');
+            container.innerHTML = `
+                <div class="result-card">
+                    <h2>Decision Failure Diagnosis</h2>
+                    
+                    <div class="result-field">
+                        <div class="result-label">Decision Blocker:</div>
+                        <div class="result-value">${result.decision_blocker}</div>
+                    </div>
+                    
+                    <div class="result-field">
+                        <div class="result-label">Why:</div>
+                        <div class="result-value">${result.why}</div>
+                    </div>
+                    
+                    <div class="result-field">
+                        <div class="result-label">Where:</div>
+                        <div class="result-value">${result.where}</div>
+                    </div>
+                    
+                    <div class="result-field">
+                        <div class="result-label">What to Change First:</div>
+                        <div class="result-value" style="background: #fff; padding: 1rem; border-left: 4px solid #007bff; margin-top: 0.5rem;">
+                            ${result.what_to_change_first}
+                        </div>
+                    </div>
+                    
+                    <div class="result-field">
+                        <div class="result-label">Expected Decision Lift:</div>
+                        <div class="result-value">${result.expected_decision_lift}</div>
+                    </div>
+                </div>
+            `;
+            container.style.display = 'block';
+        }
+        
+        function clearForm() {
+            document.getElementById('contentInput').value = '';
+            document.getElementById('resultContainer').style.display = 'none';
+            document.getElementById('errorMessage').style.display = 'none';
+        }
+    </script>
+</body>
+</html>
+
