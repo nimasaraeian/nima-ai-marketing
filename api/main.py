@@ -10,7 +10,8 @@ Deployment:
 from fastapi import APIRouter, FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi.exceptions import RequestValidationError
+from pydantic import BaseModel, ValidationError
 from dotenv import load_dotenv
 import os
 import sys
@@ -62,6 +63,22 @@ from decision_engine import router as decision_engine_router
 from visual_trust_engine import analyze_visual_trust_from_path
 from routes.image_trust import router as image_trust_router
 from routes.training_landing_friction import router as landing_friction_training_router
+
+# Import pricing packages
+try:
+    from config.pricing_packages import get_all_packages, PricingTier
+except ImportError:
+    # Fallback if pricing packages not available
+    get_all_packages = None
+    PricingTier = None
+
+# Import pricing packages
+try:
+    from config.pricing_packages import get_all_packages, PricingTier
+except ImportError:
+    # Fallback if pricing packages not available
+    get_all_packages = None
+    PricingTier = None
 
 # Load environment variables
 # Try loading from project root .env file
@@ -141,6 +158,67 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Exception handler for validation errors (422)
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """
+    Handle FastAPI validation errors (422) with user-friendly messages.
+    """
+    import logging
+    logger = logging.getLogger("brain")
+    
+    errors = exc.errors()
+    error_details = []
+    
+    for error in errors:
+        field = " -> ".join(str(loc) for loc in error.get("loc", []))
+        message = error.get("msg", "Validation error")
+        error_type = error.get("type", "unknown")
+        
+        # Translate common error types to user-friendly messages
+        user_friendly_msg = message
+        if error_type == "missing":
+            user_friendly_msg = f"Required field '{field}' is missing"
+        elif error_type == "value_error.missing":
+            user_friendly_msg = f"Required field '{field}' is missing"
+        elif error_type == "type_error":
+            user_friendly_msg = f"Invalid data type for field '{field}'. Expected: {message}"
+        elif "required" in message.lower():
+            user_friendly_msg = f"Required field '{field}' is missing"
+        
+        error_details.append({
+            "field": field,
+            "message": user_friendly_msg,
+            "type": error_type,
+            "original_message": message
+        })
+        
+        logger.warning(f"Validation error: {field} - {message} (type: {error_type})")
+        print(f"❌ Validation error: {field} - {user_friendly_msg}")
+    
+    # Create user-friendly error message
+    if len(error_details) == 1:
+        error_detail = error_details[0]
+        user_message = error_detail['message']
+    else:
+        fields_list = ", ".join([e['field'] for e in error_details if e['field']])
+        user_message = f"Validation errors in {len(error_details)} field(s): {fields_list}. Please check your request data."
+    
+    print(f"\n❌ VALIDATION ERROR (422): {user_message}")
+    print(f"Request path: {request.url.path}")
+    print(f"Request method: {request.method}")
+    print(f"Error details: {error_details}")
+    
+    return JSONResponse(
+        status_code=422,
+        content={
+            "detail": error_details,
+            "message": user_message,
+            "error_type": "validation_error",
+            "path": request.url.path
+        }
+    )
+
 # Global exception handler to catch any unhandled exceptions
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
@@ -166,10 +244,31 @@ async def global_exception_handler(request: Request, exc: Exception):
     # For other exceptions, return a BrainResponse to maintain API contract
     user_friendly_message = "An unexpected error occurred. Please try again later."
     
-    if "OPENAI_API_KEY" in error_message:
+    if "does not contain enough decision-critical" in error_message.lower() or "not contain enough decision-critical" in error_message.lower() or ("image" in error_message.lower() and "decision" in error_message.lower() and "information" in error_message.lower()):
+        user_friendly_message = (
+            "The image does not contain enough decision-critical information for analysis.\n\n"
+            "SOLUTION: Please upload an image that includes:\n"
+            "- Pricing information (visible prices, plans, or cost)\n"
+            "- Call-to-action buttons or links (Buy, Sign Up, Get Started, etc.)\n"
+            "- Guarantees, refund policies, or risk-reduction elements\n"
+            "- Headlines or key messaging\n"
+            "- Product/service information\n\n"
+            "Alternatively, you can:\n"
+            "- Paste the text content directly instead of using an image\n"
+            "- Provide both image and text together for better analysis\n"
+            "- Use a screenshot that captures the full landing page with all decision elements"
+        )
+    elif "403" in error_message or "forbidden" in error_message.lower() or "blocks automated access" in error_message.lower():
+        # Preserve the helpful error message about 403 errors
+        user_friendly_message = error_message if "SOLUTION:" in error_message else (
+            "This website blocks automated access (403 Forbidden). "
+            "Please manually copy the page content (headline, CTA, price, guarantee) "
+            "and paste it in the input field instead of the URL."
+        )
+    elif "OPENAI_API_KEY" in error_message:
         user_friendly_message = "OpenAI API key is not configured. Please contact support."
-    elif "timeout" in error_message.lower():
-        user_friendly_message = "Request timed out. Please try again."
+    elif "timeout" in error_message.lower() or "timed out" in error_message.lower():
+        user_friendly_message = error_message if "SOLUTION:" in error_message else "Request timed out. Please try again."
     elif "connection" in error_message.lower():
         user_friendly_message = "Connection error. Please check your internet connection."
     
@@ -1036,13 +1135,34 @@ async def brain_endpoint(
         user_friendly_message = "An unexpected error occurred while processing your request."
         
         # Check for specific error patterns and provide user-friendly messages
-        if "JSON" in error_message or "json" in error_message.lower() or "No number after minus sign" in error_message or "minus sign" in error_message.lower():
+        if "does not contain enough decision-critical" in error_message.lower() or "not contain enough decision-critical" in error_message.lower() or ("image" in error_message.lower() and "decision" in error_message.lower() and "information" in error_message.lower()):
+            user_friendly_message = (
+                "The image does not contain enough decision-critical information for analysis.\n\n"
+                "SOLUTION: Please upload an image that includes:\n"
+                "- Pricing information (visible prices, plans, or cost)\n"
+                "- Call-to-action buttons or links (Buy, Sign Up, Get Started, etc.)\n"
+                "- Guarantees, refund policies, or risk-reduction elements\n"
+                "- Headlines or key messaging\n"
+                "- Product/service information\n\n"
+                "Alternatively, you can:\n"
+                "- Paste the text content directly instead of using an image\n"
+                "- Provide both image and text together for better analysis\n"
+                "- Use a screenshot that captures the full landing page with all decision elements"
+            )
+        elif "403" in error_message or "forbidden" in error_message.lower() or "blocks automated access" in error_message.lower():
+            # Preserve the helpful error message about 403 errors
+            user_friendly_message = error_message if "SOLUTION:" in error_message else (
+                "This website blocks automated access (403 Forbidden). "
+                "Please manually copy the page content (headline, CTA, price, guarantee) "
+                "and paste it in the input field instead of the URL."
+            )
+        elif "JSON" in error_message or "json" in error_message.lower() or "No number after minus sign" in error_message or "minus sign" in error_message.lower():
             print(f"⚠️ Detected JSON parsing error pattern: {error_message[:100]}")
             user_friendly_message = "Model response format error. The AI returned an unexpected format. Please try again."
         elif "OPENAI_API_KEY" in error_message:
             user_friendly_message = "OpenAI API key is not configured. Please contact support."
-        elif "timeout" in error_message.lower():
-            user_friendly_message = "Request timed out. Please try again."
+        elif "timeout" in error_message.lower() or "timed out" in error_message.lower():
+            user_friendly_message = error_message if "SOLUTION:" in error_message else "Request timed out. Please try again."
         elif "connection" in error_message.lower() or "network" in error_message.lower():
             user_friendly_message = "Network connection error. Please check your internet connection and try again."
         
@@ -1089,6 +1209,56 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/api/packages")
+async def get_packages():
+    """
+    Get all pricing packages for Decision Brain services.
+    
+    Returns the 3-tier package structure:
+    - Decision Diagnosis (Entry)
+    - Decision Deep Dive (High-Value Project)
+    - Decision Strategy Partnership (Advisory)
+    """
+    logger = logging.getLogger("brain")
+    if get_all_packages is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Pricing packages configuration not available"
+        )
+    
+    try:
+        packages = get_all_packages()
+        # Convert to dict format for JSON response
+        packages_data = []
+        for package in packages:
+            packages_data.append({
+                "tier": package.tier.value,
+                "name": package.name,
+                "positioning_line": package.positioning_line,
+                "features": [
+                    {
+                        "title": feature.title,
+                        "description": feature.description
+                    }
+                    for feature in package.features
+                ],
+                "pricing_note": package.pricing_note,
+                "cta_text": package.cta_text,
+                "cta_route": package.cta_route
+            })
+        
+        return {
+            "packages": packages_data,
+            "total_tiers": len(packages_data)
+        }
+    except Exception as e:
+        logger.error(f"Error retrieving packages: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to retrieve packages: {str(e)}"
+        )
+
+
 @app.get("/api/system-prompt/info")
 def system_prompt_info():
     """Get information about loaded system prompt"""
@@ -1130,6 +1300,7 @@ async def cognitive_friction_endpoint(
     goal: Optional[str] = Form(None),
     audience: Optional[str] = Form(None),
     language: Optional[str] = Form(None),
+    url: Optional[str] = Form(None),
     image: Optional[UploadFile] = File(None),
     use_trained_model: Optional[str] = Form(None),
 ):
@@ -1158,123 +1329,183 @@ async def cognitive_friction_endpoint(
     System Prompt: Defined in cognitive_friction_engine.py
     """
     import json as json_lib
+    logger = logging.getLogger("brain")
     
     try:
-        # Handle both JSON and form-data requests
+        # Parse request body
         content_type = request.headers.get("content-type", "")
+        
+        # Initialize variables (all inside try block)
         image_base64 = None
         image_mime = None
         image_score_value = None
         use_trained_model_flag = False
-        image_bytes_raw: Optional[bytes] = None
-        image_filename: Optional[str] = None
+        input_data: Optional[CognitiveFrictionInput] = None
         
         if "application/json" in content_type:
-            # JSON request (may include image as base64 string)
-            try:
-                body = await request.json()
+            # JSON request
+            body = await request.json()
+            
+            # Extract and process image if provided
+            if body.get("image"):
+                image_base64_raw = body.get("image")
+                image_mime = body.get("image_type") or body.get("image_mime") or "image/jpeg"
                 
-                # Extract image if provided as base64 string in JSON
-                
-                if body.get("image"):
-                    # Image is provided as base64 string
-                    image_base64_raw = body.get("image")
-                    image_mime = body.get("image_type") or body.get("image_mime") or "image/jpeg"
-                    
-                    print(f"[/api/brain/cognitive-friction] Image found in JSON body (length: {len(str(image_base64_raw))} chars, type: {image_mime})")
-                    
-                    # Remove data URL prefix if present (e.g., "data:image/jpeg;base64,")
-                    if isinstance(image_base64_raw, str):
-                        if "," in image_base64_raw:
-                            # Has data URL prefix
-                            image_base64 = image_base64_raw.split(",", 1)[1]
-                            # Extract mime type from prefix if available
-                            prefix = image_base64_raw.split(",", 1)[0]
-                            if "image/" in prefix:
-                                extracted_mime = prefix.split("image/")[1].split(";")[0]
-                                if extracted_mime:
-                                    image_mime = f"image/{extracted_mime}"
-                            print(f"[/api/brain/cognitive-friction] Removed data URL prefix, image_base64 length: {len(image_base64)}")
-                        else:
-                            image_base64 = image_base64_raw
+                # Remove data URL prefix if present
+                if isinstance(image_base64_raw, str):
+                    if "," in image_base64_raw:
+                        image_base64 = image_base64_raw.split(",", 1)[1]
+                        prefix = image_base64_raw.split(",", 1)[0]
+                        if "image/" in prefix:
+                            extracted_mime = prefix.split("image/")[1].split(";")[0]
+                            if extracted_mime:
+                                image_mime = f"image/{extracted_mime}"
                     else:
-                        image_base64 = str(image_base64_raw)
-                    
-                    # Decode base64 to bytes for image score computation
-                    try:
-                        image_data = base64.b64decode(image_base64)
-                        image_bytes_raw = image_data
-                        image_filename = body.get("image_name") or image_filename
-                        if len(image_data) > 0:
-                            image_score_value = compute_image_score_from_bytes(image_data)
-                            print(f"[/api/brain/cognitive-friction] Image score from JSON: {image_score_value}")
-                        print(f"[/api/brain/cognitive-friction] Image from JSON: type={image_mime}, size={len(image_data)} bytes")
-                    except Exception as img_err:
-                        print(f"⚠️ Error processing image from JSON: {img_err}")
-                        import traceback
-                        traceback.print_exc()
-                        # Continue without image score, but keep base64 for API call
-                else:
-                    print(f"[/api/brain/cognitive-friction] No image found in JSON body")
+                        image_base64 = image_base64_raw
                 
-                use_trained_model_flag = bool(body.get("use_trained_model", False))
-                # Remove image fields from body before creating input_data
-                body_for_input = {
-                    k: v
-                    for k, v in body.items()
-                    if k
-                    not in [
-                        "image",
-                        "image_type",
-                        "image_mime",
-                        "image_name",
-                        "meta",
-                        "use_trained_model",
-                    ]
-                }
-                
-                # Ensure required fields have defaults
-                if "raw_text" not in body_for_input:
-                    body_for_input["raw_text"] = ""
-                if "platform" not in body_for_input:
-                    body_for_input["platform"] = "landing_page"
-                if "goal" not in body_for_input:
-                    body_for_input["goal"] = ["leads"]
-                if "audience" not in body_for_input:
-                    body_for_input["audience"] = "cold"
-                if "language" not in body_for_input:
-                    body_for_input["language"] = "en"
-                
-                # Ensure goal is a list
-                if isinstance(body_for_input.get("goal"), str):
-                    try:
-                        body_for_input["goal"] = json_lib.loads(body_for_input["goal"])
-                    except:
-                        body_for_input["goal"] = [body_for_input["goal"]]
-                elif not isinstance(body_for_input.get("goal"), list):
-                    body_for_input["goal"] = ["leads"]
-                
-                print(f"[/api/brain/cognitive-friction] Creating input_data with: raw_text='{body_for_input.get('raw_text', '')[:50]}...', platform={body_for_input.get('platform')}, goal={body_for_input.get('goal')}")
+                # Compute image score
                 try:
-                    input_data = CognitiveFrictionInput(**body_for_input)
-                    print(f"[/api/brain/cognitive-friction] ✅ Input data created successfully")
-                except Exception as validation_err:
-                    print(f"[/api/brain/cognitive-friction] ❌ Validation error: {type(validation_err).__name__}: {validation_err}")
-                    import traceback
-                    traceback.print_exc()
-                    raise HTTPException(status_code=400, detail=f"Invalid input data: {str(validation_err)}")
-                
-            except json_lib.JSONDecodeError as json_err:
-                raise HTTPException(status_code=400, detail=f"Invalid JSON: {json_err}")
-            except Exception as parse_err:
-                print(f"❌ Error parsing JSON request: {type(parse_err).__name__}: {parse_err}")
-                import traceback
-                traceback.print_exc()
-                raise HTTPException(status_code=400, detail=f"Error parsing request: {str(parse_err)}")
+                    image_data = base64.b64decode(image_base64)
+                    if len(image_data) > 0:
+                        image_score_value = compute_image_score_from_bytes(image_data)
+                except Exception:
+                    pass  # Continue without image score
+            
+            use_trained_model_flag = bool(body.get("use_trained_model", False))
+            
+            # Extract raw text (support multiple field names)
+            raw_text_value = (body.get("pageCopy") or body.get("page_copy") or body.get("raw_text") or "").strip()
+            
+            # Extract URL (support multiple field names)
+            url_value = body.get("url") or body.get("target_url") or None
+            if url_value:
+                url_value = url_value.strip() if isinstance(url_value, str) else None
+            print(f"[/api/brain/cognitive-friction] 🔍 Extracted URL from body: {url_value}")
+            
+            # Extract meta fields
+            meta_dict = body.get("meta", {}) or {}
+            if not isinstance(meta_dict, dict):
+                meta_dict = {}
+            
+            # Normalize price_level
+            price_level_raw = body.get("priceLevel") or body.get("price_level")
+            price_level_normalized = None
+            if price_level_raw:
+                price_level_map = {
+                    "Low": "Low (Impulse)",
+                    "Medium": "Medium (Considered)",
+                    "High": "High (High-risk)",
+                    "low": "Low (Impulse)",
+                    "medium": "Medium (Considered)",
+                    "high": "High (High-risk)",
+                }
+                price_level_normalized = price_level_map.get(price_level_raw) or price_level_map.get(price_level_raw.strip().capitalize())
+            
+            # Normalize decision_depth
+            decision_depth_raw = body.get("decisionDepth") or body.get("decision_depth")
+            decision_depth_normalized = None
+            if decision_depth_raw:
+                decision_depth_map = {
+                    "Impulse": "Impulse",
+                    "Considered": "Considered",
+                    "High-commitment": "High-Commitment",
+                    "High-Commitment": "High-Commitment",
+                    "high-commitment": "High-Commitment",
+                    "impulse": "Impulse",
+                    "considered": "Considered",
+                }
+                decision_depth_normalized = decision_depth_map.get(decision_depth_raw)
+                if not decision_depth_normalized:
+                    decision_depth_normalized = decision_depth_map.get(decision_depth_raw.lower())
+                if not decision_depth_normalized:
+                    depth_lower = decision_depth_raw.lower().strip()
+                    if "high" in depth_lower and "commitment" in depth_lower:
+                        decision_depth_normalized = "High-Commitment"
+                    elif depth_lower == "impulse":
+                        decision_depth_normalized = "Impulse"
+                    elif depth_lower == "considered":
+                        decision_depth_normalized = "Considered"
+            
+            # Normalize user_intent_stage
+            user_intent_raw = body.get("userIntent") or body.get("user_intent") or body.get("user_intent_stage")
+            user_intent_normalized = None
+            if user_intent_raw:
+                user_intent_map = {
+                    "Learn": "Learn",
+                    "Compare": "Compare",
+                    "Validate": "Validate",
+                    "Buy": "Buy",
+                }
+                user_intent_normalized = user_intent_map.get(user_intent_raw, user_intent_raw)
+            
+            # Normalize goal
+            goal_value = body.get("goal", ["leads"])
+            if isinstance(goal_value, str):
+                try:
+                    goal_value = json_lib.loads(goal_value)
+                except:
+                    goal_value = [goal_value]
+            if not isinstance(goal_value, list):
+                goal_value = [goal_value] if goal_value else ["leads"]
+            
+            # Build meta dict
+            meta_final = {}
+            for key, value in meta_dict.items():
+                if value is not None:
+                    meta_final[key] = value
+            
+            # Add URL and page_type to meta if provided at top level (for backward compatibility)
+            if "url" in body and body.get("url"):
+                meta_final["url"] = body.get("url")
+            if "pageType" in body:
+                meta_final["page_type"] = body.get("pageType")
+            elif "page_type" in body:
+                meta_final["page_type"] = body.get("page_type")
+            
+            # Build body_for_input - ONLY ONCE, inside try block
+            body_for_input = {
+                "raw_text": raw_text_value,
+                "platform": body.get("platform", "landing_page"),
+                "goal": goal_value,
+                "audience": body.get("audience", "cold"),
+                "language": body.get("language", "en"),
+                "meta": meta_final,
+            }
+            
+            # Add URL if provided (prefer top-level url_value, fallback to meta url)
+            if url_value:
+                body_for_input["url"] = url_value
+                print(f"[/api/brain/cognitive-friction] ✅ Added URL to body_for_input: {url_value}")
+            elif meta_final.get("url"):
+                body_for_input["url"] = meta_final.get("url")
+                print(f"[/api/brain/cognitive-friction] ✅ Added URL from meta to body_for_input: {meta_final.get('url')}")
+            else:
+                print(f"[/api/brain/cognitive-friction] ⚠️ No URL found in body or meta")
+            
+            # Add optional fields if normalized
+            if price_level_normalized:
+                body_for_input["price_level"] = price_level_normalized
+            if decision_depth_normalized:
+                body_for_input["decision_depth"] = decision_depth_normalized
+            if user_intent_normalized:
+                body_for_input["user_intent_stage"] = user_intent_normalized
+            if "businessType" in body:
+                body_for_input["business_type"] = body.get("businessType")
+            elif "business_type" in body:
+                body_for_input["business_type"] = body.get("business_type")
+            
+            # Validate using Pydantic
+            try:
+                print(f"[/api/brain/cognitive-friction] 📦 Creating CognitiveFrictionInput with: url={body_for_input.get('url')}, raw_text length={len(body_for_input.get('raw_text', ''))}")
+                input_data = CognitiveFrictionInput(**body_for_input)
+                print(f"[/api/brain/cognitive-friction] ✅ Input data created. input_data.url={getattr(input_data, 'url', 'NOT SET')}")
+            except ValidationError as ve:
+                print(f"[/api/brain/cognitive-friction] ❌ Validation error: {ve}")
+                raise HTTPException(status_code=400, detail=f"Invalid input data: {ve}")
+            
         else:
-            # Form-data request (with optional image)
-            # Parse goal as JSON array if provided as string
-            goal_list = ["leads"]  # default
+            # Form-data request
+            goal_list = ["leads"]
             if goal:
                 try:
                     goal_list = json_lib.loads(goal) if isinstance(goal, str) else goal
@@ -1283,68 +1514,108 @@ async def cognitive_friction_endpoint(
                 except:
                     goal_list = [goal] if goal else ["leads"]
             
-            input_data = CognitiveFrictionInput(
-                raw_text=raw_text or "",
-                platform=platform or "landing_page",
-                goal=goal_list,
-                audience=audience or "cold",
-                language=language or "en",
-                meta={}
-            )
+            # Extract URL from form data if provided
+            url_from_form = None
+            if url:
+                url_from_form = url.strip() if isinstance(url, str) else None
+            
+            input_data_dict = {
+                "raw_text": raw_text or "",
+                "platform": platform or "landing_page",
+                "goal": goal_list,
+                "audience": audience or "cold",
+                "language": language or "en",
+                "meta": {}
+            }
+            
+            # Add URL if provided
+            if url_from_form:
+                input_data_dict["url"] = url_from_form
+            
+            input_data = CognitiveFrictionInput(**input_data_dict)
             
             # Handle image if provided (multipart/form-data)
-            image_base64_form = None
-            image_mime_form = None
-            image_score_value = None
             if image:
                 await image.seek(0)
                 image_data = await image.read()
-                image_base64_form = base64.b64encode(image_data).decode('utf-8')
-                image_mime_form = image.content_type or "image/png"
+                image_base64 = base64.b64encode(image_data).decode('utf-8')
+                image_mime = image.content_type or "image/png"
                 
-                # Compute image score for visual-only analysis
                 if len(image_data) > 0:
                     image_score_value = compute_image_score_from_bytes(image_data)
-                    print(f"[/api/brain/cognitive-friction] Image score from form: {image_score_value}")
-                
-                print(f"[/api/brain/cognitive-friction] Image received from form: {image.filename}, type: {image_mime_form}, size: {len(image_data)} bytes")
             
-            # Use form image if available, otherwise use JSON image
-            image_base64 = image_base64_form if image_base64_form else image_base64
-            image_mime = image_mime_form if image_mime_form else image_mime
-
-            if use_trained_model_form := use_trained_model:
-                if isinstance(use_trained_model_form, str):
-                    use_trained_model_flag = use_trained_model_form.strip().lower() in {"1", "true", "yes"}
+            if use_trained_model:
+                if isinstance(use_trained_model, str):
+                    use_trained_model_flag = use_trained_model.strip().lower() in {"1", "true", "yes"}
                 else:
-                    use_trained_model_flag = bool(use_trained_model_form)
+                    use_trained_model_flag = bool(use_trained_model)
         
-        # Validate: at least one of text or image must be provided
+        # Validate: at least one of text, image, or URL must be provided (BEFORE scraping)
         has_text = input_data.raw_text and input_data.raw_text.strip()
         has_image = image_base64 is not None and image_mime is not None
+        # Check URL - try both input_data.url and meta.url
+        has_url = False
+        url_for_validation = None
+        if hasattr(input_data, 'url') and input_data.url:
+            url_for_validation = input_data.url.strip() if isinstance(input_data.url, str) else None
+            has_url = bool(url_for_validation)
+        elif input_data.meta and input_data.meta.get("url"):
+            url_for_validation = input_data.meta.get("url")
+            has_url = bool(url_for_validation)
         
-        print(f"[/api/brain/cognitive-friction] Validation check:")
-        print(f"  - has_text: {has_text} (raw_text length: {len(input_data.raw_text) if input_data.raw_text else 0})")
-        print(f"  - has_image: {has_image} (image_base64: {image_base64[:50] if image_base64 else None}..., image_mime: {image_mime})")
+        print(f"[/api/brain/cognitive-friction] 🔍 Validation check (BEFORE scraping): has_text={has_text}, has_image={has_image}, has_url={has_url} (url={url_for_validation})")
         
-        if not has_text and not has_image:
-            error_detail = (
-                "Either text (raw_text) or image must be provided for analysis. "
-                f"Current status: raw_text={'empty' if not input_data.raw_text or not input_data.raw_text.strip() else 'provided'}, "
-                f"image={'not provided' if image_base64 is None else 'provided'}"
-            )
-            print(f"[/api/brain/cognitive-friction] ❌ Validation failed: {error_detail}")
+        # Only raise error if we have NO input at all
+        if not has_text and not has_image and not has_url:
             raise HTTPException(
                 status_code=400,
-                detail=error_detail
+                detail=(
+                    "Please provide either page copy text, a screenshot, or a URL for analysis. "
+                    f"Current status: raw_text={'empty' if not input_data.raw_text or not input_data.raw_text.strip() else 'provided'}, "
+                    f"image={'not provided' if image_base64 is None else 'provided'}, "
+                    f"url={'not provided' if not has_url else 'provided'}"
+                )
             )
+        
+        # If raw_text is empty but URL is provided (either in url field or meta), try to scrape the page
+        if not input_data.raw_text or not input_data.raw_text.strip():
+            # Try to get URL from input_data.url first, then from meta
+            url_to_scrape = None
+            if hasattr(input_data, 'url') and input_data.url:
+                url_to_scrape = input_data.url.strip() if isinstance(input_data.url, str) else None
+            elif input_data.meta and input_data.meta.get("url"):
+                url_to_scrape = input_data.meta.get("url")
+            
+            if url_to_scrape:
+                print(f"[/api/brain/cognitive-friction] 🔍 Attempting to scrape URL: {url_to_scrape}")
+                try:
+                    from utils.decision_snapshot_extractor import extract_decision_snapshot, format_snapshot_text
+                    snapshot = await extract_decision_snapshot(url_to_scrape)  # AWAIT async call
+                    scraped_text = format_snapshot_text(snapshot)
+                    input_data.raw_text = scraped_text
+                    print(f"[/api/brain/cognitive-friction] ✅ Successfully scraped {len(scraped_text)} characters from URL")
+                except Exception as scrape_err:
+                    error_msg = str(scrape_err)
+                    print(f"[/api/brain/cognitive-friction] ❌ Scraping failed: {error_msg}")
+                    raise HTTPException(
+                        status_code=400,
+                        detail=error_msg if "SOLUTION:" in error_msg else (
+                            f"Failed to scrape content from URL: {error_msg}\n\n"
+                            "SOLUTION: Please manually copy and paste the page content:\n"
+                            "- Hero headline\n"
+                            "- CTA button text\n"
+                            "- Price (if visible)\n"
+                            "- Guarantee/refund information\n\n"
+                            "Then paste this content in the 'Page Copy' field instead of using the URL."
+                        )
+                    )
         
         if use_trained_model_flag and has_image:
             raise HTTPException(
                 status_code=400,
                 detail="Fine-tuned model currently supports text-only analysis. Remove the image or disable use_trained_model.",
             )
-
+        
         finetuned_model_id = None
         if use_trained_model_flag:
             try:
@@ -1353,120 +1624,48 @@ async def cognitive_friction_endpoint(
                 raise HTTPException(status_code=404, detail=str(err)) from err
             except ValueError as err:
                 raise HTTPException(status_code=400, detail=str(err)) from err
-
-        # Call analysis with optional image and image_score
-        print(f"[/api/brain/cognitive-friction] Calling analyze_cognitive_friction...")
-        print(f"  - has_text: {has_text} (length: {len(input_data.raw_text) if input_data.raw_text else 0})")
-        print(f"  - has_image: {has_image} (mime: {image_mime})")
-        print(f"  - image_score: {image_score_value}")
-        print(f"  - use_trained_model: {use_trained_model_flag} (model_id={finetuned_model_id})")
         
-        try:
-            result = analyze_cognitive_friction(
-                input_data,
-                image_base64=image_base64,
-                image_mime=image_mime,
-                image_score=image_score_value,
-                model_override=finetuned_model_id,
-            )
-
-            # Always set visual_trust field, even if no image provided
-            if image_bytes_raw:
-                try:
-                    # Use Vision API for enhanced element-by-element analysis
-                    mime_type = image_mime or "image/png"
-                    result.visual_trust = await _analyze_visual_trust_with_vision(
-                        image_bytes=image_bytes_raw,
-                        mime_type=mime_type
-                    )
-                    
-                    # Also set legacy visual_trust_analysis for backward compatibility
-                    try:
-                        legacy_payload = {
-                            "overall_label": result.visual_trust.label.lower() if result.visual_trust.label else None,
-                            "low_percent": result.visual_trust.distribution.get("low", 0.0) / 100.0 if result.visual_trust.distribution else 0.0,
-                            "medium_percent": result.visual_trust.distribution.get("medium", 0.0) / 100.0 if result.visual_trust.distribution else 0.0,
-                            "high_percent": result.visual_trust.distribution.get("high", 0.0) / 100.0 if result.visual_trust.distribution else 0.0,
-                            "explanation": result.visual_trust.notes or "",
-                            "error": None if result.visual_trust.status == "ok" else result.visual_trust.status
-                        }
-                        # result.visual_trust_analysis = VisualTrustAnalysis(**legacy_payload)  # Temporarily disabled
-                        pass  # VisualTrustAnalysis disabled
-                    except Exception:
-                        logger.warning("Failed to create legacy visual_trust_analysis", exc_info=True)
-                except Exception:
-                    logger.warning("Failed to attach visual trust analysis payload", exc_info=True)
-                    # Set unavailable status on error
-                    # result.visual_trust = _build_visual_trust_result(  # Temporarily disabled
-                    #     status="unavailable",
-                    #     notes="Failed to process visual trust analysis."
-                    # )
-                    pass  # _build_visual_trust_result disabled
-            else:
-                # No image provided - set unavailable status
-                # result.visual_trust = _build_visual_trust_result(  # Temporarily disabled
-                #     status="unavailable",
-                #     notes="Visual trust analysis was not performed for this landing page."
-                # )
-                pass  # _build_visual_trust_result disabled
-
-            psychology_payload: Optional[PsychologyAnalysisResult] = None
-            if has_text:
-                try:
-                    advanced_view = analyze_advanced_psychology(
-                        input_data.raw_text,
-                        platform=input_data.platform,
-                        goal=input_data.goal,
-                        audience=input_data.audience,
-                        language=input_data.language,
-                    )
-                    psychology_payload = PsychologyAnalysisResult(
-                        analysis=None,
-                        overall={
-                            "summary": "Advanced psychological view generated alongside cognitive friction analysis.",
-                            "global_score": None,
-                        },
-                        human_readable_report="Advanced psychological dashboard data.",
-                        advanced_view=advanced_view,
-                    )
-                except Exception as psych_error:
-                    print(
-                        f"[/api/brain/cognitive-friction] ⚠️ Advanced psychology analysis failed: {psych_error}"
-                    )
-
-            if psychology_payload:
+        # Run analysis
+        result = analyze_cognitive_friction(
+            input_data,
+            image_base64=image_base64,
+            image_mime=image_mime,
+            image_score=image_score_value,
+            model_override=finetuned_model_id,
+        )
+        
+        # Add advanced psychology analysis if text is available
+        if has_text:
+            try:
+                advanced_view = analyze_advanced_psychology(
+                    input_data.raw_text,
+                    platform=input_data.platform,
+                    goal=input_data.goal,
+                    audience=input_data.audience,
+                    language=input_data.language,
+                )
+                psychology_payload = PsychologyAnalysisResult(
+                    analysis=None,
+                    overall={
+                        "summary": "Advanced psychological view generated alongside cognitive friction analysis.",
+                        "global_score": None,
+                    },
+                    human_readable_report="Advanced psychological dashboard data.",
+                    advanced_view=advanced_view,
+                )
                 result.psychology = psychology_payload
-
-            print(f"[/api/brain/cognitive-friction] ✅ Analysis completed successfully")
-            return result
-        except InvalidAIResponseError as invalid_err:
-            print(
-                f"\n❌ Invalid AI response structure; returning HTTP 500. raw length={len(invalid_err.raw_output)}"
-            )
-            return JSONResponse(
-                status_code=500,
-                content={
-                    "error": "AI returned invalid structure",
-                    "raw_output": invalid_err.raw_output,
-                },
-            )
-        except ValueError as ve:
-            print(f"\n❌ ValueError in analyze_cognitive_friction: {ve}")
-            import traceback
-            traceback.print_exc()
-            raise HTTPException(status_code=400, detail=f"Invalid input: {ve}")
-        except Exception as analysis_error:
-            print(f"\n❌ ERROR in analyze_cognitive_friction: {type(analysis_error).__name__}: {analysis_error}")
-            import traceback
-            traceback.print_exc()
-            raise HTTPException(status_code=500, detail=f"Analysis failed: {str(analysis_error)}")
+            except Exception:
+                pass  # Continue without advanced psychology
+        
+        return result
+        
+    except ValidationError as ve:
+        raise HTTPException(status_code=400, detail=f"Invalid input: {ve}")
     except HTTPException:
         raise
     except Exception as e:
-        print(f"\n❌ ERROR in cognitive_friction_endpoint: {type(e).__name__}: {e}")
-        import traceback
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.error(f"Error in cognitive_friction_endpoint: {type(e).__name__}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Internal error: {str(e)}")
 
 
 @app.post("/api/brain/image-trust")
@@ -1781,7 +1980,7 @@ async def psychology_analysis_with_image(
 
 @app.post("/api/brain/analyze-with-image")
 async def analyze_with_image(
-    text: str = Form(..., description="Ad or landing page text to analyze"),
+    text: Optional[str] = Form(None, description="Ad or landing page text to analyze (optional if image is provided)"),
     image: Optional[UploadFile] = File(
         default=None, description="Optional image file for visual trust analysis"
     ),

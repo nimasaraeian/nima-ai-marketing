@@ -15,8 +15,16 @@ import re
 import logging
 from typing import Optional, Dict
 from urllib.parse import urlparse
-import requests
 from bs4 import BeautifulSoup
+
+# Import Playwright-based URL renderer (ASYNC ONLY)
+try:
+    from api.utils.url_renderer_async import render_url_with_js
+    PLAYWRIGHT_AVAILABLE = True
+except ImportError:
+    PLAYWRIGHT_AVAILABLE = False
+    # Fallback to requests if Playwright is not available
+    import requests
 
 logger = logging.getLogger("decision_snapshot")
 
@@ -60,7 +68,7 @@ def detect_channel(url: str) -> str:
         return "generic_saas"
 
 
-def extract_decision_snapshot(url: str) -> Dict[str, any]:
+async def extract_decision_snapshot(url: str) -> Dict[str, any]:
     """
     Extract decision-critical elements from a URL.
     
@@ -84,25 +92,54 @@ def extract_decision_snapshot(url: str) -> Dict[str, any]:
         url = 'https://' + url
     
     try:
-        # Fetch page with realistic browser headers
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'en-US,en;q=0.9',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'DNT': '1',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Cache-Control': 'max-age=0',
-        }
-        session = requests.Session()
-        response = session.get(url, headers=headers, timeout=30, allow_redirects=True)
+        # Use Playwright to render JavaScript-heavy pages (ASYNC)
+        if PLAYWRIGHT_AVAILABLE:
+            logger.info(f"[Decision Snapshot] Using Playwright Async to render URL: {url}")
+            html = await render_url_with_js(url, timeout=60000, wait_until="networkidle")  # 60 seconds timeout
+        else:
+            # Fallback to requests if Playwright is not available
+            logger.warning("[Decision Snapshot] Playwright not available, falling back to requests")
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'DNT': '1',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Sec-Fetch-Dest': 'document',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Cache-Control': 'max-age=0',
+            }
+            session = requests.Session()
+            response = session.get(url, headers=headers, timeout=30, allow_redirects=True)
+            
+            # Handle 403 Forbidden specifically
+            if response.status_code == 403:
+                raise ValueError(
+                    "This website blocks automated access (403 Forbidden). "
+                    "Many e-commerce sites like Trendyol, Amazon, etc. use anti-bot protection. "
+                    "\n\nSOLUTION: Please manually copy and paste the following from the page:\n"
+                    "- Hero headline\n"
+                    "- CTA button text\n"
+                    "- Price (if visible)\n"
+                    "- Guarantee/refund information (if present)\n\n"
+                    "Then paste this content directly in the input field (not the URL)."
+                )
+            
+            response.raise_for_status()
+            html = response.text
         
-        # Handle 403 Forbidden specifically
-        if response.status_code == 403:
+    except ValueError as ve:
+        # Re-raise ValueError (from Playwright or our custom errors) as-is
+        raise ve
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"[Decision Snapshot] Error fetching URL {url}: {error_msg}")
+        
+        # Check for common error patterns
+        if "403" in error_msg or "forbidden" in error_msg.lower():
             raise ValueError(
                 "This website blocks automated access (403 Forbidden). "
                 "Many e-commerce sites like Trendyol, Amazon, etc. use anti-bot protection. "
@@ -113,33 +150,6 @@ def extract_decision_snapshot(url: str) -> Dict[str, any]:
                 "- Guarantee/refund information (if present)\n\n"
                 "Then paste this content directly in the input field (not the URL)."
             )
-        
-        response.raise_for_status()
-        html = response.text
-        
-    except requests.exceptions.Timeout:
-        raise ValueError(
-            "The request timed out. This usually means:\n"
-            "- The website is slow or unresponsive\n"
-            "- The website is blocking automated requests\n"
-            "- Network connection issues\n\n"
-            "SOLUTION: Please manually copy and paste the page content:\n"
-            "- Hero headline\n"
-            "- CTA button text\n"
-            "- Price\n"
-            "- Guarantee/refund info\n\n"
-            "Then paste this content directly in the input field."
-        )
-    except requests.exceptions.HTTPError as e:
-        if e.response.status_code == 403:
-            raise ValueError(
-                "This website blocks automated access (403 Forbidden). "
-                "Please manually copy and paste the page content (headline, CTA, price, guarantee) "
-                "and paste it in the input field instead of the URL."
-            )
-        raise ValueError(f"Failed to fetch URL (HTTP {e.response.status_code}): {e}")
-    except requests.exceptions.RequestException as e:
-        error_msg = str(e)
         if "timeout" in error_msg.lower() or "timed out" in error_msg.lower():
             raise ValueError(
                 "The request timed out. Please manually copy and paste the page content "

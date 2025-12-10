@@ -46,7 +46,8 @@ def get_client():
         
         if not api_key:
             raise ValueError("OPENAI_API_KEY environment variable not set")
-        _client = OpenAI(api_key=api_key)
+        # Set timeout to 300 seconds (5 minutes) for long-running requests
+        _client = OpenAI(api_key=api_key, timeout=300.0, max_retries=3)
     return _client
 
 # Load system prompt once at startup

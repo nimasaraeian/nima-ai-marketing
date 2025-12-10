@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Decision Brain Services | Strategic Decision Diagnostics</title>
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        /* Services Page Specific Styles */
+        .services-hero {
+            background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+            color: white;
+            padding: 4rem 0;
+            text-align: center;
+        }
+        
+        .services-hero h1 {
+            font-size: 2.5rem;
+            margin-bottom: 1rem;
+            font-weight: 700;
+        }
+        
+        .services-hero p {
+            font-size: 1.25rem;
+            opacity: 0.95;
+            max-width: 700px;
+            margin: 0 auto;
+        }
+        
+        .packages-section {
+            padding: 4rem 0;
+            background: var(--bg-secondary);
+        }
+        
+        .packages-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 0 20px;
+        }
+        
+        .packages-intro {
+            text-align: center;
+            margin-bottom: 3rem;
+        }
+        
+        .packages-intro h2 {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+            color: var(--text-primary);
+        }
+        
+        .packages-intro p {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        
+        .packages-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+            gap: 2rem;
+            margin-top: 3rem;
+        }
+        
+        .package-card {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            box-shadow: var(--shadow-md);
+            transition: transform 0.2s, box-shadow 0.2s;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .package-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-lg);
+        }
+        
+        .package-card.featured {
+            border: 2px solid var(--primary-color);
+            position: relative;
+        }
+        
+        .package-card.featured::before {
+            content: "Most Popular";
+            position: absolute;
+            top: -12px;
+            right: 2rem;
+            background: var(--primary-color);
+            color: white;
+            padding: 0.25rem 1rem;
+            border-radius: 20px;
+            font-size: 0.875rem;
+            font-weight: 600;
+        }
+        
+        .package-header {
+            margin-bottom: 1.5rem;
+        }
+        
+        .package-name {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 0.5rem;
+        }
+        
+        .package-positioning {
+            font-size: 1rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+            font-style: italic;
+        }
+        
+        .package-features {
+            flex: 1;
+            margin-bottom: 2rem;
+        }
+        
+        .package-features h3 {
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+        
+        .feature-item {
+            margin-bottom: 1rem;
+            padding-right: 1.5rem;
+            position: relative;
+        }
+        
+        .feature-item::before {
+            content: "→";
+            position: absolute;
+            right: 0;
+            color: var(--primary-color);
+            font-weight: 600;
+        }
+        
+        .feature-title {
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.25rem;
+        }
+        
+        .feature-description {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            line-height: 1.5;
+        }
+        
+        .package-pricing-note {
+            background: var(--bg-secondary);
+            padding: 1rem;
+            border-radius: 8px;
+            margin-bottom: 1.5rem;
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            line-height: 1.6;
+        }
+        
+        .package-cta {
+            width: 100%;
+        }
+        
+        .package-cta .btn {
+            width: 100%;
+            justify-content: center;
+        }
+        
+        .value-proposition {
+            background: white;
+            padding: 4rem 0;
+        }
+        
+        .value-proposition-content {
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: center;
+            padding: 0 20px;
+        }
+        
+        .value-proposition h2 {
+            font-size: 2rem;
+            margin-bottom: 1.5rem;
+            color: var(--text-primary);
+        }
+        
+        .value-proposition p {
+            font-size: 1.1rem;
+            color: var(--text-secondary);
+            line-height: 1.8;
+            margin-bottom: 2rem;
+        }
+        
+        .value-proposition .highlight {
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: var(--primary-color);
+            margin: 2rem 0;
+            padding: 1.5rem;
+            background: var(--bg-secondary);
+            border-radius: 8px;
+        }
+        
+        @media (max-width: 768px) {
+            .packages-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .services-hero h1 {
+                font-size: 2rem;
+            }
+            
+            .services-hero p {
+                font-size: 1.1rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar">
+        <div class="container">
+            <div class="nav-brand">
+                <a href="/">Nima Saraeian</a>
+            </div>
+            <ul class="nav-menu">
+                <li><a href="/">Home</a></li>
+                <li><a href="/services" class="active">Services</a></li>
+                <li><a href="/about">About</a></li>
+                <li><a href="/contact">Contact</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <!-- Services Hero -->
+    <section class="services-hero">
+        <div class="container">
+            <h1>Decision Brain Services</h1>
+            <p>Strategic decision diagnostics — not audits, not tools. Understand why users hesitate before you spend on redesign or ads.</p>
+        </div>
+    </section>
+
+    <!-- Value Proposition -->
+    <section class="value-proposition">
+        <div class="value-proposition-content">
+            <h2>Why Decision Diagnosis Matters</h2>
+            <p>
+                Most conversion problems aren't design problems. They're decision problems. 
+                Users hesitate because something breaks psychologically at the moment of decision — 
+                not because your button is the wrong color.
+            </p>
+            <div class="highlight">
+                One wrong decision can cost more than this diagnosis.
+            </div>
+            <p>
+                We diagnose the psychological barrier preventing decisions. 
+                You get clarity on what to fix first — before spending on redesign, A/B tests, or ad campaigns.
+            </p>
+        </div>
+    </section>
+
+    <!-- Packages Section -->
+    <section class="packages-section">
+        <div class="packages-container">
+            <div class="packages-intro">
+                <h2>Three Ways to Work Together</h2>
+                <p>Start with a Decision Diagnosis. Then scale to deeper analysis or ongoing partnership as needed.</p>
+            </div>
+
+            <div class="packages-grid">
+                <!-- Tier 1: Decision Diagnosis -->
+                <div class="package-card">
+                    <div class="package-header">
+                        <div class="package-name">Decision Diagnosis</div>
+                        <div class="package-positioning">
+                            Identify why users hesitate — before spending on redesign or ads.
+                        </div>
+                    </div>
+                    
+                    <div class="package-features">
+                        <h3>What's Included</h3>
+                        <div class="feature-item">
+                            <div class="feature-title">Full Decision Brain Analysis</div>
+                            <div class="feature-description">One page or one flow analyzed with context-aware outcome detection</div>
+                        </div>
+                        <div class="feature-item">
+                            <div class="feature-title">Confidence Scoring</div>
+                            <div class="feature-description">Understand how certain we are about the diagnosis</div>
+                        </div>
+                        <div class="feature-item">
+                            <div class="feature-title">Client-Ready Decision Report</div>
+                            <div class="feature-description">Professional 7-section report you can send directly to stakeholders</div>
+                        </div>
+                        <div class="feature-item">
+                            <div class="feature-title">Clear 'What to Fix First' Logic</div>
+                            <div class="feature-description">Priority intervention that addresses the core psychological barrier</div>
+                        </div>
+                    </div>
+                    
+                    <div class="package-pricing-note">
+                        Priced to filter unserious clients while remaining accessible as entry to larger projects. 
+                        One wrong decision can cost more than this diagnosis.
+                    </div>
+                    
+                    <div class="package-cta">
+                        <button class="btn btn-primary" onclick="startDiagnosis()">Start with Decision Diagnosis</button>
+                    </div>
+                </div>
+
+                <!-- Tier 2: Decision Deep Dive -->
+                <div class="package-card featured">
+                    <div class="package-header">
+                        <div class="package-name">Decision Deep Dive</div>
+                        <div class="package-positioning">
+                            Understand how decisions break across the entire user journey.
+                        </div>
+                    </div>
+                    
+                    <div class="package-features">
+                        <h3>What's Included</h3>
+                        <div class="feature-item">
+                            <div class="feature-title">Multi-Page or Journey-Level Analysis</div>
+                            <div class="feature-description">Analysis across multiple touchpoints in the user journey</div>
+                        </div>
+                        <div class="feature-item">
+                            <div class="feature-title">Cross-Context Outcome Comparison</div>
+                            <div class="feature-description">See how decision failures differ across pages or flows</div>
+                        </div>
+                        <div class="feature-item">
+                            <div class="feature-title">Secondary Outcome Modeling</div>
+                            <div class="feature-description">Understand compound blockers and their interactions</div>
+                        </div>
+                        <div class="feature-item">
+                            <div class="feature-title">Strategic Decision Map</div>
+                            <div class="feature-description">Visual map of where decisions break and why</div>
+                        </div>
+                        <div class="feature-item">
+                            <div class="feature-title">Priority Roadmap</div>
+                            <div class="feature-description">What to change now vs. later, with strategic sequencing</div>
+                        </div>
+                    </div>
+                    
+                    <div class="package-pricing-note">
+                        Project-based pricing for comprehensive journey analysis. 
+                        Value anchored to cost of wrong decisions across multiple touchpoints.
+                    </div>
+                    
+                    <div class="package-cta">
+                        <button class="btn btn-primary" onclick="startDiagnosis()">Start with Decision Diagnosis</button>
+                    </div>
+                </div>
+
+                <!-- Tier 3: Decision Partnership -->
+                <div class="package-card">
+                    <div class="package-header">
+                        <div class="package-name">Decision Strategy Partnership</div>
+                        <div class="package-positioning">
+                            A strategic partner focused on how users decide — not just how pages look.
+                        </div>
+                    </div>
+                    
+                    <div class="package-features">
+                        <h3>What's Included</h3>
+                        <div class="feature-item">
+                            <div class="feature-title">Ongoing Decision Analysis</div>
+                            <div class="feature-description">Continuous diagnostics as you iterate and launch</div>
+                        </div>
+                        <div class="feature-item">
+                            <div class="feature-title">Iterative Diagnostics</div>
+                            <div class="feature-description">Track how decision patterns change with each update</div>
+                        </div>
+                        <div class="feature-item">
+                            <div class="feature-title">Support Across Launches</div>
+                            <div class="feature-description">Decision analysis for new products, pricing, or positioning changes</div>
+                        </div>
+                        <div class="feature-item">
+                            <div class="feature-title">Strategic Decision Advisory</div>
+                            <div class="feature-description">Guidance on decision architecture, not just page optimization</div>
+                        </div>
+                    </div>
+                    
+                    <div class="package-pricing-note">
+                        Advisory engagement for teams who want decision intelligence as a strategic capability. 
+                        Pricing reflects ongoing strategic value, not per-page analysis.
+                    </div>
+                    
+                    <div class="package-cta">
+                        <button class="btn btn-primary" onclick="startDiagnosis()">Start with Decision Diagnosis</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer style="background: var(--bg-dark); color: white; padding: 2rem 0; text-align: center;">
+        <div class="container">
+            <p>&copy; 2024 Nima Saraeian. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script>
+        function startDiagnosis() {
+            // Redirect to decision diagnosis flow
+            window.location.href = '/decision-demo.html';
+        }
+    </script>
+</body>
+</html>
+
+
+
+

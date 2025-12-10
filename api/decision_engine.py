@@ -13,14 +13,45 @@ import json
 import logging
 import os
 import re
-from typing import Literal, Optional
+from collections import defaultdict, deque, Counter
+from typing import Literal, Optional, Deque, Dict, List, Any
 from pydantic import BaseModel, Field, ValidationError, validator
 from dotenv import load_dotenv
 from pathlib import Path
+from urllib.parse import urlparse
 from openai import OpenAI
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 router = APIRouter()
+logger = logging.getLogger("decision_engine")
+
+# Import decision memory layer
+try:
+    from utils.decision_memory_layer import (
+        decision_memory_layer,
+        DecisionHistoryInsight,
+        FatigueLevel
+    )
+except ImportError:
+    # Fallback if memory layer not available
+    decision_memory_layer = None
+    DecisionHistoryInsight = None
+    FatigueLevel = None
+    logger.warning("Decision memory layer not available. Memory features disabled.")
+
+# Import decision stage inference
+try:
+    from utils.decision_stage_inference import (
+        decision_stage_inference,
+        DecisionStage,
+        FrictionSeverity
+    )
+except ImportError:
+    # Fallback if stage inference not available
+    decision_stage_inference = None
+    DecisionStage = None
+    FrictionSeverity = None
+    logger.warning("Decision stage inference not available. Stage features disabled.")
 
 # Import high-trust platform config
 try:
@@ -38,7 +69,125 @@ if env_file.exists():
 else:
     load_dotenv()
 
-logger = logging.getLogger("decision_engine")
+# ====================================================
+# PLATFORM DETECTION
+# ====================================================
+
+def detect_platform_from_url(url: str) -> str:
+    """
+    Very simple platform detector based on hostname.
+    Returns values like: "amazon_product_page", "generic".
+    """
+    if not url:
+        return "generic"
+    
+    try:
+        hostname = urlparse(url).hostname or ""
+    except Exception:
+        hostname = ""
+    
+    hostname = hostname.lower()
+    
+    if "amazon." in hostname:
+        return "amazon_product_page"
+    # TODO: in future add ebay, etsy, etc.
+    return "generic"
+
+
+def default_cta_subtext(platform: str) -> str:
+    """
+    Get default CTA subtext based on platform.
+    For Amazon, return empty string as seller cannot modify CTA.
+    """
+    if platform == "amazon_product_page":
+        return ""
+    return "Know exactly why users don't decide, and what to change first."
+
+
+# ====================================================
+# DECISION MEMORY STORE
+# ====================================================
+
+class DecisionMemoryItem(BaseModel):
+    """Single memory item for a decision analysis"""
+    url: str
+    blocker: str
+    location: str
+
+
+class DecisionMemoryStore:
+    """In-memory store for decision analysis history"""
+    
+    def __init__(self, max_items_per_url: int = 10):
+        self._store: Dict[str, Deque[DecisionMemoryItem]] = defaultdict(
+            lambda: deque(maxlen=max_items_per_url)
+        )
+    
+    def add(self, item: DecisionMemoryItem) -> None:
+        """Add a new memory item for a URL"""
+        self._store[item.url].append(item)
+    
+    def get(self, url: str) -> List[DecisionMemoryItem]:
+        """Get all memory items for a URL"""
+        return list(self._store.get(url, []))
+
+
+# Global memory store instance
+decision_memory = DecisionMemoryStore()
+
+
+def summarize_chronic_patterns(items: List[DecisionMemoryItem]) -> Dict[str, Any]:
+    """
+    Summarize chronic decision blockers based on history items.
+    
+    Returns a dict like:
+    {
+        "Outcome Unclear": {
+            "count": 4,
+            "top_locations": ["Pricing", "Hero"],
+            "severity": "high",
+        },
+        ...
+    }
+    """
+    if not items:
+        return {}
+    
+    blocker_counts = Counter()
+    blocker_locations: Dict[str, Counter] = {}
+    
+    for it in items:
+        blocker = it.blocker
+        blocker_counts[blocker] += 1
+        blocker_locations.setdefault(blocker, Counter())
+        # برای هر blocker، location متناظر را هم بشمار
+        blocker_locations[blocker][it.location] += 1
+    
+    chronic: Dict[str, Any] = {}
+    for blocker, count in blocker_counts.items():
+        # اگر کمتر از 3 بار دیده شده، فعلاً chronic حساب نکن
+        if count < 3:
+            continue
+        
+        loc_counter = blocker_locations.get(blocker, Counter())
+        top_locations = [loc for loc, _ in loc_counter.most_common(3)]
+        
+        # severity ساده بر اساس تعداد تکرار
+        if count >= 7:
+            severity = "high"
+        elif count >= 4:
+            severity = "medium"
+        else:
+            severity = "low"
+        
+        chronic[blocker] = {
+            "count": count,
+            "top_locations": top_locations,
+            "severity": severity,
+        }
+    
+    return chronic
+
 
 # ====================================================
 # SYSTEM PROMPT - DO NOT MODIFY WITHOUT EXPLICIT INSTRUCTION
@@ -105,11 +254,19 @@ The model is NOT allowed to invent new fix structures.
 
 ALLOWED FIX TEMPLATES:
 
+For generic platforms (non-Amazon):
 1. "Add one line directly under the CTA: 'See the ONE reason users hesitate — and the FIRST thing to fix.'"
-
 2. "Replace the CTA subtext with: 'Know exactly why users don't decide, and what to change first.'"
-
 3. "Add a short promise near the CTA: 'Get a clear decision diagnosis and one immediate fix.'"
+
+For Amazon product pages (platform == "amazon_product_page"):
+- DO NOT use CTA-related templates (seller cannot modify Amazon's CTA buttons).
+- Focus on seller-controllable elements:
+  1. "Rewrite the product title to clearly state [specific benefit/outcome]."
+  2. "Update bullet point #X to emphasize [specific value proposition]."
+  3. "Add to bullet points: '[concrete benefit statement]'."
+  4. "Improve the main product image to show [specific visual element]."
+  5. "Enhance A+ content section to highlight [specific feature/benefit]."
 
 FORBIDDEN:
 - Any mention of reports
@@ -175,7 +332,8 @@ OUTPUT REQUIREMENTS:
 - All fields are REQUIRED.
 - "decision_blocker" MUST be exactly one value from the fixed list.
 - "why" MUST contain exactly TWO sentences.
-- "where" MUST be exactly one of: Hero, CTA, Pricing, Form.
+- "where" MUST be exactly one of: Hero, CTA, Pricing, Form (for generic platforms).
+- For Amazon product pages (platform == "amazon_product_page"), "where" MUST be one of: Title, Bullet Points, Main Image, Gallery, A+ Content, Pricing.
 
 LOCATION RULE:
 If the selected blocker is "Risk Not Addressed",
@@ -211,7 +369,39 @@ In such cases prioritize ambiguity, differentiation, or value clarity blockers:
 - Commitment Anxiety (when commitment feels too large)
 
 Do NOT select "Risk Not Addressed" for high-trust platforms even if risk-related hesitation seems present.
-Trust and risk are already handled by the platform's established policies."""
+Trust and risk are already handled by the platform's established policies.
+
+========================
+PLATFORM-SPECIFIC RULES
+========================
+
+The input will include a `platform` field that indicates the type of platform.
+You MUST adapt your recommendations based on this platform.
+
+If `platform` == "amazon_product_page":
+
+- NEVER suggest changing the main CTA button text or subtext (the seller cannot modify Amazon's global UI).
+- Focus ONLY on elements the seller can control:
+  - Product title
+  - Bullet points
+  - Product description / A+ content
+  - Image gallery (what is shown in the images)
+- When you mention a "Location", use locations that make sense on Amazon, e.g.:
+  - "Title" (instead of "Hero")
+  - "Bullet Points" (instead of "CTA")
+  - "Main Image" or "Gallery" (instead of "Hero Image")
+  - "A+ Content" (for product description)
+  - "Pricing" (if relevant, though seller has limited control)
+- Recommendations MUST be concrete and product-specific (do not use generic SaaS/analytics wording like
+  "Know exactly why users don't decide").
+- Make sure your suggested copy sounds appropriate for an Amazon product listing.
+- The "where" field MUST be one of: "Title", "Bullet Points", "Main Image", "Gallery", "A+ Content", "Pricing"
+  (NOT "Hero", "CTA", or "Form" unless they have specific Amazon meaning).
+
+If `platform` == "generic":
+
+- Behave as before (normal website/landing page logic).
+- Use standard locations: "Hero", "CTA", "Pricing", "Form" as appropriate."""
 
 # ====================================================
 # DATA MODELS
@@ -251,6 +441,24 @@ class DecisionEngineOutput(BaseModel):
     
     # DEBUG MARKER: Track which code path generated this response
     response_source: Optional[str] = Field(None, description="DEBUG: Response source path marker")
+    
+    # Memory: Historical analysis data for this URL
+    memory: Optional[Dict[str, Any]] = Field(None, description="Historical analysis data for this URL")
+    
+    # Chronic patterns: Recurring blockers that appear frequently
+    chronic_patterns: Optional[Dict[str, Any]] = Field(None, description="Chronic decision blocker patterns based on history")
+    
+    # Decision History Insight: Analysis of decision history when memory exists
+    decision_history_insight: Optional[Dict[str, Any]] = Field(None, description="Decision history insight when memory exists")
+    
+    # Decision Stage Assessment: Inferred decision stage and friction severity
+    decision_stage_assessment: Optional[Dict[str, Any]] = Field(None, description="Decision stage assessment and friction severity adjustment")
+    
+    # Context: Additional context data extracted from the page
+    context: Optional[Dict[str, Any]] = Field(None, description="Context data including business_type, price_level, decision_depth, user_intent_stage, platform, url")
+    
+    # Confidence: Confidence score for the primary outcome (0-100)
+    confidence: Optional[float] = Field(None, ge=0, le=100, description="Confidence score for the primary decision blocker analysis (0-100)")
     
     @validator('why')
     @classmethod
@@ -622,7 +830,8 @@ def get_client() -> OpenAI:
         
         if not api_key:
             raise ValueError("OPENAI_API_KEY environment variable is not set")
-        _client = OpenAI(api_key=api_key)
+        # Set timeout to 300 seconds (5 minutes) for long-running requests
+        _client = OpenAI(api_key=api_key, timeout=300.0, max_retries=3)
     return _client
 
 
@@ -630,7 +839,7 @@ def get_client() -> OpenAI:
 # MAIN ANALYSIS FUNCTION
 # ====================================================
 
-def analyze_decision_failure(input_data: DecisionEngineInput) -> DecisionEngineOutput:
+async def analyze_decision_failure(input_data: DecisionEngineInput) -> DecisionEngineOutput:
     """
     Analyze content and return ONE decision blocker and ONE fix.
     
@@ -670,7 +879,7 @@ def analyze_decision_failure(input_data: DecisionEngineInput) -> DecisionEngineO
     if url_to_extract:
         try:
             from utils.decision_snapshot_extractor import extract_decision_snapshot, format_snapshot_text, detect_channel
-            snapshot = extract_decision_snapshot(url_to_extract)
+            snapshot = await extract_decision_snapshot(url_to_extract)  # AWAIT async call
             user_message = format_snapshot_text(snapshot)
             
             # Auto-detect channel from snapshot or URL
@@ -742,6 +951,14 @@ def analyze_decision_failure(input_data: DecisionEngineInput) -> DecisionEngineO
     
     if not user_message or not user_message.strip():
         raise ValueError("No content provided. Please provide either content text or a valid URL.")
+    
+    # Detect platform from URL
+    page_url = url_to_extract or input_data.url
+    platform = detect_platform_from_url(page_url or "")
+    
+    # Add platform information to user message
+    if platform and platform != "generic":
+        user_message = f"Platform: {platform}\n\n{user_message}"
     
     # Build system prompt - modify if risk blocker should be suppressed
     system_prompt = DECISION_ENGINE_V1_SYSTEM_PROMPT
@@ -961,8 +1178,104 @@ YOU MUST CHOOSE: Outcome Unclear, Effort Too High, or Commitment Anxiety."""
         blocker = validated_data.get("decision_blocker", "")
         where = validated_data.get("where", "")
         
-        # Try to get channel-specific template
-        template = get_fix_template(blocker, channel, where)
+        # Calculate base confidence from expected_lift (needed for stage assessment fallback)
+        lift = validated_data.get('expected_decision_lift', '')
+        if 'High' in lift:
+            base_confidence = 85.0
+        elif 'Medium' in lift:
+            base_confidence = 70.0
+        else:
+            base_confidence = 60.0
+        
+        # DECISION STAGE INFERENCE
+        decision_stage_assessment = None
+        if decision_stage_inference:
+            try:
+                # Extract context signals from snapshot
+                cta_text = None
+                has_pricing = False
+                has_form = False
+                has_checkout = False
+                has_education = False
+                has_comparison = False
+                has_confirmation = False
+                offer_type = None
+                
+                if snapshot:
+                    cta_text = snapshot.get('cta')
+                    has_pricing = bool(snapshot.get('price'))
+                    # Infer other signals from content
+                    page_text = user_message.lower() if user_message else ""
+                    has_education = any(phrase in page_text for phrase in [
+                        "how it works", "what is", "learn about", "understand"
+                    ])
+                    has_comparison = any(phrase in page_text for phrase in [
+                        "compare", "vs", "versus", "features", "pricing"
+                    ])
+                    has_form = "form" in page_text or where == "Form"
+                    has_checkout = any(phrase in page_text for phrase in [
+                        "checkout", "complete purchase", "place order"
+                    ])
+                    has_confirmation = any(phrase in page_text for phrase in [
+                        "thank you", "confirmation", "what happens next"
+                    ])
+                
+                # Infer stage
+                stage_inference = decision_stage_inference.infer_stage(
+                    cta_text=cta_text,
+                    page_content=user_message,
+                    has_pricing=has_pricing,
+                    has_form=has_form,
+                    has_checkout=has_checkout,
+                    has_education=has_education,
+                    has_comparison=has_comparison,
+                    has_confirmation=has_confirmation,
+                    offer_type=offer_type
+                )
+                
+                # Assess friction severity at this stage
+                friction_assessment = decision_stage_inference.assess_friction_severity(
+                    outcome=blocker,
+                    stage=stage_inference.stage
+                )
+                
+                # Build stage assessment
+                # Ensure confidence is always a number (fallback to base_confidence if None)
+                stage_confidence = stage_inference.confidence if stage_inference.confidence is not None else base_confidence
+                decision_stage_assessment = {
+                    "stage": stage_inference.stage.value,
+                    "confidence": stage_confidence,
+                    "signals": stage_inference.signals,
+                    "explanation": stage_inference.explanation,
+                    "friction_severity": friction_assessment.severity.value,
+                    "friction_reasoning": friction_assessment.reasoning,
+                    "friction_recommendation": friction_assessment.recommendation
+                }
+                
+                logger.info(
+                    f"Inferred decision stage: {stage_inference.stage.value} "
+                    f"({stage_inference.confidence:.0f}% confidence). "
+                    f"Friction severity: {friction_assessment.severity.value}"
+                )
+                
+                # Adjust recommendation if friction is natural/acceptable
+                if friction_assessment.severity in [FrictionSeverity.NATURAL, FrictionSeverity.ACCEPTABLE]:
+                    # Don't change the fix, but note that it may not need fixing
+                    logger.info(
+                        f"Friction '{blocker}' is {friction_assessment.severity.value} at "
+                        f"{stage_inference.stage.value} stage. Consider guidance over fixing."
+                    )
+                
+            except Exception as stage_error:
+                logger.warning(f"Failed to infer decision stage: {stage_error}", exc_info=True)
+        
+        # For Amazon, skip CTA-related templates and use platform-specific logic
+        if platform == "amazon_product_page":
+            # Don't apply generic CTA templates for Amazon
+            template = None
+        else:
+            # Try to get channel-specific template
+            template = get_fix_template(blocker, channel, where)
         if template:
             validated_data["what_to_change_first"] = template
             logger.info(
@@ -979,6 +1292,182 @@ YOU MUST CHOOSE: Outcome Unclear, Effort Too High, or Commitment Anxiety."""
                 f"✅ Decision Engine success path: response_source=decision_engine_primary, "
                 f"blocker={validated_data.get('decision_blocker')}, channel={channel}"
             )
+            
+            # Determine the URL to use for memory (prefer extracted URL, fallback to input URL)
+            page_url = url_to_extract or input_data.url
+            context_id = page_url or "default_context"  # Use URL as context ID
+            
+            # base_confidence already calculated above
+            
+            # MEMORY-AWARE ANALYSIS (before saving new analysis)
+            decision_history_insight = None
+            adjusted_confidence = base_confidence
+            confidence_reason = ""
+            current_stage = None
+            
+            # Extract current stage from stage assessment if available
+            if decision_stage_assessment:
+                current_stage = decision_stage_assessment.get('stage')
+            
+            if decision_memory_layer and context_id:
+                try:
+                    # Check if we should suppress repeated fixes
+                    proposed_fix = validated_data.get('what_to_change_first', '')
+                    should_suppress, suppress_reason = decision_memory_layer.suppress_repeated_fixes(
+                        context_id, proposed_fix
+                    )
+                    
+                    if should_suppress and suppress_reason:
+                        logger.warning(f"Repeated fix detected: {suppress_reason}")
+                        # Note: We don't change the fix here, but we note it in history insight
+                    
+                    # Adjust confidence based on memory (stage-aware)
+                    blocker = validated_data.get('decision_blocker', '')
+                    if current_stage:
+                        # Use stage-aware confidence adjustment
+                        adjusted_confidence, confidence_reason = decision_memory_layer.adjust_confidence_with_memory_stage_aware(
+                            context_id, blocker, base_confidence, current_stage
+                        )
+                    else:
+                        # Fallback to regular confidence adjustment
+                        adjusted_confidence, confidence_reason = decision_memory_layer.adjust_confidence_with_memory(
+                            context_id, blocker, base_confidence
+                        )
+                    
+                    # Generate history insight (with stage)
+                    decision_history_insight_obj = decision_memory_layer.generate_history_insight(
+                        context_id, blocker, adjusted_confidence, current_stage
+                    )
+                    
+                    # Convert to dict for JSON serialization
+                    decision_history_insight = {
+                        "what_failed": decision_history_insight_obj.what_failed,
+                        "what_improved": decision_history_insight_obj.what_improved,
+                        "what_remains_unresolved": decision_history_insight_obj.what_remains_unresolved,
+                        "why_still_hesitating": decision_history_insight_obj.why_still_hesitating,
+                        "trajectory_summary": decision_history_insight_obj.trajectory_summary,
+                    }
+                    
+                    if decision_history_insight_obj.fatigue_analysis:
+                        decision_history_insight["fatigue"] = {
+                            "level": decision_history_insight_obj.fatigue_analysis.fatigue_level.value,
+                            "indicators": decision_history_insight_obj.fatigue_analysis.indicators,
+                            "recommendation": decision_history_insight_obj.fatigue_analysis.recommendation
+                        }
+                    
+                    if decision_history_insight_obj.trust_dynamics:
+                        decision_history_insight["trust_dynamics"] = {
+                            "trend": decision_history_insight_obj.trust_dynamics.trust_debt_trend,
+                            "consistency": decision_history_insight_obj.trust_dynamics.trust_consistency,
+                            "recommendation": decision_history_insight_obj.trust_dynamics.recommendation
+                        }
+                    
+                    # Add journey insight (Journey × Memory integration)
+                    if decision_history_insight_obj.journey_insight:
+                        journey = decision_history_insight_obj.journey_insight
+                        decision_history_insight["journey_insight"] = {
+                            "observed_stage_trajectory": journey.observed_stage_trajectory,
+                            "interpretation": journey.interpretation,
+                            "what_is_preventing_advancement": journey.what_is_preventing_advancement,
+                            "action_recommendation": journey.action_recommendation
+                        }
+                        if journey.trajectory_analysis:
+                            decision_history_insight["journey_insight"]["trajectory_analysis"] = {
+                                "trajectory_type": journey.trajectory_analysis.trajectory_type,
+                                "stage_sequence": journey.trajectory_analysis.stage_sequence,
+                                "interpretation": journey.trajectory_analysis.interpretation,
+                                "blocker_identified": journey.trajectory_analysis.blocker_identified,
+                                "recommendation": journey.trajectory_analysis.recommendation
+                            }
+                    
+                    logger.info(f"Generated decision history insight for context: {context_id}")
+                    
+                except Exception as mem_error:
+                    logger.warning(f"Failed to generate history insight: {mem_error}", exc_info=True)
+            
+            # Save to enhanced memory layer (with stage information)
+            if decision_memory_layer and context_id:
+                try:
+                    decision_memory_layer.add_analysis(
+                        context_id=context_id,
+                        primary_outcome=validated_data.get('decision_blocker', ''),
+                        secondary_outcome=None,  # Could extract from 'why' if needed
+                        confidence_score=adjusted_confidence,
+                        location=validated_data.get('where', ''),
+                        what_to_change=validated_data.get('what_to_change_first', ''),
+                        expected_lift=validated_data.get('expected_decision_lift', ''),
+                        url=page_url or "",
+                        inferred_stage=current_stage  # Store inferred decision stage
+                    )
+                    logger.debug(f"Saved analysis to enhanced memory layer for context: {context_id}, stage: {current_stage}")
+                except Exception as mem_error:
+                    logger.warning(f"Failed to save to enhanced memory: {mem_error}", exc_info=True)
+            
+            # Also save to legacy memory store for backward compatibility
+            if page_url:
+                try:
+                    memory_item = DecisionMemoryItem(
+                        url=page_url,
+                        blocker=validated_data.get('decision_blocker', ''),
+                        location=validated_data.get('where', '')
+                    )
+                    decision_memory.add(memory_item)
+                    logger.debug(f"Saved decision analysis to legacy memory for URL: {page_url}")
+                except Exception as mem_error:
+                    logger.warning(f"Failed to save to legacy memory: {mem_error}", exc_info=True)
+            
+            # Calculate and attach legacy memory summary and chronic patterns
+            if page_url:
+                try:
+                    history_items = decision_memory.get(page_url)
+                    if history_items:
+                        # Count most common blockers and locations
+                        blocker_counter = Counter(item.blocker for item in history_items)
+                        location_counter = Counter(item.location for item in history_items)
+                        
+                        memory_summary = {
+                            "times_seen": len(history_items),
+                            "most_common_blockers": [
+                                {"blocker": blocker, "count": count}
+                                for blocker, count in blocker_counter.most_common(3)
+                            ],
+                            "most_common_locations": [
+                                {"location": location, "count": count}
+                                for location, count in location_counter.most_common(3)
+                            ],
+                            "last_blockers": [
+                                {"blocker": item.blocker, "location": item.location}
+                                for item in history_items[-5:]  # Last 5 analyses
+                            ]
+                        }
+                        
+                        # Calculate chronic patterns
+                        chronic = summarize_chronic_patterns(history_items)
+                        
+                        # Update output with memory data and chronic patterns
+                        output.memory = memory_summary
+                        output.chronic_patterns = chronic if chronic else None
+                        logger.debug(
+                            f"Attached legacy memory summary: {len(history_items)} items, "
+                            f"chronic patterns: {len(chronic)} patterns for URL: {page_url}"
+                        )
+                except Exception as mem_error:
+                    logger.warning(f"Failed to calculate legacy memory summary: {mem_error}", exc_info=True)
+            
+            # Attach decision history insight
+            if decision_history_insight:
+                output.decision_history_insight = decision_history_insight
+                logger.debug(f"Attached decision history insight to output")
+            
+            # Attach decision stage assessment
+            if decision_stage_assessment:
+                output.decision_stage_assessment = decision_stage_assessment
+                logger.debug(f"Attached decision stage assessment to output")
+            
+            # Always set confidence (use adjusted_confidence if available, otherwise base_confidence)
+            output.confidence = adjusted_confidence
+            logger.debug(f"Set confidence to {adjusted_confidence}%")
+            
             return output
         except ValidationError as exc:
             logger.error("Pydantic validation failed: %s", exc)
@@ -1008,19 +1497,202 @@ async def decision_engine_endpoint(input_data: DecisionEngineInput):
     - Validates output strictly (rejects invalid responses)
     """
     try:
-        result = analyze_decision_failure(input_data)
+        result = await analyze_decision_failure(input_data)  # AWAIT async call
+        
+        # Extract context data from snapshot if available
+        context_data = {}
+        url_to_extract = input_data.url
+        if not url_to_extract and input_data.content.strip().startswith(('http://', 'https://')):
+            url_to_extract = input_data.content.strip()
+        
+        if url_to_extract:
+            context_data["url"] = url_to_extract
+            platform = detect_platform_from_url(url_to_extract)
+            if platform:
+                context_data["platform"] = platform
+            
+            try:
+                from utils.decision_snapshot_extractor import extract_decision_snapshot
+                snapshot = await extract_decision_snapshot(url_to_extract)  # AWAIT async call
+                
+                # Extract additional context from snapshot if available
+                if snapshot:
+                    # Infer business type from channel
+                    if snapshot.get('channel'):
+                        channel = snapshot.get('channel')
+                        if channel == "marketplace_product":
+                            context_data["business_type"] = "marketplace"
+                        elif channel == "generic_saas":
+                            context_data["business_type"] = "saas"
+                    
+                    # Infer price level
+                    if snapshot.get('price'):
+                        context_data["price_level"] = "visible"
+                    else:
+                        context_data["price_level"] = "not_visible"
+                    
+                    # Infer decision depth from available elements
+                    elements_count = sum([
+                        1 if snapshot.get('hero_headline') else 0,
+                        1 if snapshot.get('cta') else 0,
+                        1 if snapshot.get('price') else 0,
+                        1 if snapshot.get('guarantee_risk') else 0
+                    ])
+                    if elements_count >= 3:
+                        context_data["decision_depth"] = "high_stakes"
+                    elif elements_count >= 2:
+                        context_data["decision_depth"] = "moderate"
+                    else:
+                        context_data["decision_depth"] = "low"
+                    
+                    # User intent stage (simplified inference)
+                    if snapshot.get('has_free_returns') or snapshot.get('has_delivery_date'):
+                        context_data["user_intent_stage"] = "evaluation"
+                    elif snapshot.get('cta'):
+                        context_data["user_intent_stage"] = "decision"
+                    else:
+                        context_data["user_intent_stage"] = "awareness"
+            except Exception as e:
+                logger.warning(f"Could not extract context data from snapshot: {e}")
+        
+        # Add context to result
+        result_dict = result.dict()
+        result_dict["context"] = context_data if context_data else None
+        
+        # Create new DecisionEngineOutput with context
+        result_with_context = DecisionEngineOutput(**result_dict)
+        
         # DEBUG: Log the source marker if present
         if hasattr(result, 'response_source'):
             logger.info(f"🔍 DEBUG: Returning result with response_source={result.response_source}, blocker={result.decision_blocker}")
         else:
             logger.warning("🔍 DEBUG: Result has no response_source marker! This should not happen.")
-        return result
+        return result_with_context
     except ValueError as e:
         # Validation errors are client errors
+        error_msg = str(e)
         logger.error(f"🔍 DEBUG: Exception path (ValueError) - Decision engine validation error: {e}")
-        raise HTTPException(status_code=400, detail=str(e))
+        # Preserve helpful error messages (especially 403 errors)
+        raise HTTPException(status_code=400, detail=error_msg)
     except Exception as e:
         # Other exceptions
+        error_msg = str(e)
         logger.error(f"🔍 DEBUG: Exception path (Exception) - Decision engine error: {type(e).__name__}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"Decision engine failed: {str(e)}")
+        # Check if this is a 403 or similar helpful error that should be preserved
+        if "403" in error_msg or "forbidden" in error_msg.lower() or "blocks automated access" in error_msg.lower():
+            raise HTTPException(status_code=400, detail=error_msg)
+        raise HTTPException(status_code=500, detail=f"Decision engine failed: {error_msg}")
+
+@router.post("/decision-engine/report")
+async def decision_engine_report_endpoint(
+    input_data: DecisionEngineInput,
+    format: Optional[str] = Query("markdown", description="Output format: 'markdown' or 'json'")
+):
+    """
+    Decision Engine v1 - Client-Ready Report Format
+    
+    Returns a formatted, client-ready decision report with 7 structured sections:
+    1. Executive Decision Summary
+    2. Context Snapshot
+    3. Decision Failure Breakdown
+    4. What To Fix First
+    5. Actionable Recommendations
+    6. What This Will Improve
+    7. Next Diagnostic Step
+    
+    This endpoint provides the same analysis as /decision-engine but formats it
+    as a professional diagnostic report suitable for direct client delivery.
+    """
+    try:
+        from utils.client_report_formatter import format_decision_report
+        
+        # Get decision analysis
+        result = await analyze_decision_failure(input_data)  # AWAIT async call
+        
+        # Convert Pydantic model to dict
+        decision_output = result.dict()
+        
+        # Extract context data from snapshot if available
+        context_data = {}
+        url_to_extract = input_data.url
+        if not url_to_extract and input_data.content.strip().startswith(('http://', 'https://')):
+            url_to_extract = input_data.content.strip()
+        
+        if url_to_extract:
+            context_data["url"] = url_to_extract
+            platform = detect_platform_from_url(url_to_extract)
+            if platform:
+                context_data["platform"] = platform
+            
+            try:
+                from utils.decision_snapshot_extractor import extract_decision_snapshot
+                snapshot = await extract_decision_snapshot(url_to_extract)  # AWAIT async call
+                
+                # Extract additional context from snapshot if available
+                if snapshot:
+                    # Infer business type from channel
+                    if snapshot.get('channel'):
+                        channel = snapshot.get('channel')
+                        if channel == "marketplace_product":
+                            context_data["business_type"] = "marketplace"
+                        elif channel == "generic_saas":
+                            context_data["business_type"] = "saas"
+                    
+                    # Infer price level
+                    if snapshot.get('price'):
+                        context_data["price_level"] = "visible"
+                    else:
+                        context_data["price_level"] = "not_visible"
+                    
+                    # Infer decision depth from available elements
+                    elements_count = sum([
+                        1 if snapshot.get('hero_headline') else 0,
+                        1 if snapshot.get('cta') else 0,
+                        1 if snapshot.get('price') else 0,
+                        1 if snapshot.get('guarantee_risk') else 0
+                    ])
+                    if elements_count >= 3:
+                        context_data["decision_depth"] = "high_stakes"
+                    elif elements_count >= 2:
+                        context_data["decision_depth"] = "moderate"
+                    else:
+                        context_data["decision_depth"] = "low"
+                    
+                    # User intent stage (simplified inference)
+                    if snapshot.get('has_free_returns') or snapshot.get('has_delivery_date'):
+                        context_data["user_intent_stage"] = "evaluation"
+                    elif snapshot.get('cta'):
+                        context_data["user_intent_stage"] = "decision"
+                    else:
+                        context_data["user_intent_stage"] = "awareness"
+            except Exception as e:
+                logger.warning(f"Could not extract context data from snapshot: {e}")
+        
+        # Format the report
+        if format == "json":
+            # Return structured JSON format
+            report_text = format_decision_report(decision_output, context_data)
+            return {
+                "report": report_text,
+                "raw_analysis": decision_output,
+                "context": context_data
+            }
+        else:
+            # Return markdown format
+            report_text = format_decision_report(decision_output, context_data)
+            return {
+                "report": report_text,
+                "format": "markdown"
+            }
+    except ValueError as e:
+        error_msg = str(e)
+        logger.error(f"Decision engine report error (ValueError): {e}")
+        raise HTTPException(status_code=400, detail=error_msg)
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"Decision engine report error: {type(e).__name__}: {e}", exc_info=True)
+        if "403" in error_msg or "forbidden" in error_msg.lower() or "blocks automated access" in error_msg.lower():
+            raise HTTPException(status_code=400, detail=error_msg)
+        raise HTTPException(status_code=500, detail=f"Decision report generation failed: {error_msg}")
+
 
