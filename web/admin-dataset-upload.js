@@ -1,5 +1,28 @@
 // Admin dataset upload script
-// Uses the same API_BASE_URL defined in app.js
+// API Configuration - Auto-detect based on environment
+function getApiBaseUrl() {
+    // Check if we have an environment variable
+    if (window.API_BASE_URL) {
+        return window.API_BASE_URL;
+    }
+    
+    // Check meta tag for API URL
+    const metaApiUrl = document.querySelector('meta[name="api-base-url"]');
+    if (metaApiUrl && metaApiUrl.content) {
+        return metaApiUrl.content;
+    }
+    
+    // Auto-detect: if we're on localhost, use localhost API
+    const hostname = window.location.hostname;
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '') {
+        return 'http://127.0.0.1:8000';
+    }
+    
+    // Production: use same origin (if API is on same domain)
+    return window.location.origin;
+}
+
+const API_BASE_URL = getApiBaseUrl();
 
 (function () {
     const form = document.getElementById('datasetUploadForm');
