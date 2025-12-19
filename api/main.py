@@ -50,10 +50,8 @@ from uuid import uuid4
 from PIL import Image
 import numpy as np
 
-# Add api directory to path for imports
-api_dir = Path(__file__).parent
-if str(api_dir) not in sys.path:
-    sys.path.insert(0, str(api_dir))
+# REMOVED: sys.path manipulation - not needed when using relative imports
+# When running as 'api.main:app', Python already knows 'api' is a package
 
 # Ensure stdout/stderr can emit Unicode characters (e.g., checkmarks) on Windows consoles
 if os.name == "nt":

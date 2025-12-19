@@ -30,7 +30,7 @@ logger = logging.getLogger("decision_engine")
 
 # Import decision memory layer
 try:
-    from utils.decision_memory_layer import (
+    from .utils.decision_memory_layer import (
         decision_memory_layer,
         DecisionHistoryInsight,
         FatigueLevel

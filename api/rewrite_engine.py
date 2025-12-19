@@ -16,17 +16,8 @@ from dotenv import load_dotenv
 from pathlib import Path
 from openai import OpenAI
 
-# Add api directory to path for imports
-api_dir = Path(__file__).parent
-if str(api_dir) not in sys.path:
-    sys.path.insert(0, str(api_dir))
-
-# Import models - using relative import since we're in api/ folder
-try:
-    from models.rewrite_models import RewriteInput, RewriteOutput
-except ImportError:
-    # Fallback to absolute import if relative doesn't work
-    from .models.rewrite_models import RewriteInput, RewriteOutput
+# Import models - using relative import (no sys.path manipulation needed)
+from .models.rewrite_models import RewriteInput, RewriteOutput
 
 # Load environment variables
 project_root = Path(__file__).parent.parent
