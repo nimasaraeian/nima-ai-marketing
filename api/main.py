@@ -366,7 +366,7 @@ def include_dataset_router(app: FastAPI) -> None:
     """
     logger = logging.getLogger("brain")
     try:
-        from dataset_upload import router as dataset_router  # local import to catch runtime errors
+        from .dataset_upload import router as dataset_router  # local import to catch runtime errors
     except RuntimeError as exc:
         warning = (
             "Dataset upload endpoint is disabled because python-multipart is not installed on the server. "
