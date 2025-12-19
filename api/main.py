@@ -7,12 +7,34 @@ Deployment:
   
   Module path: api.main:app
 """
+# Load environment variables FIRST, before any other imports that might use os.getenv()
+from dotenv import load_dotenv
+from pathlib import Path
+
+# Load .env from project root
+project_root = Path(__file__).parent.parent
+env_file = project_root / ".env"
+if env_file.exists():
+    load_dotenv(env_file, override=True)
+else:
+    # Fallback to api/.env if it exists
+    api_env = Path(__file__).parent / ".env"
+    if api_env.exists():
+        load_dotenv(api_env, override=True)
+    else:
+        load_dotenv()  # Load from current directory or system env
+
+import sys
+import asyncio
+
+if sys.platform.startswith("win"):
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 from fastapi import APIRouter, FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError
-from dotenv import load_dotenv
 import os
 import sys
 import base64
@@ -61,8 +83,15 @@ from rewrite_engine import rewrite_text
 from models.rewrite_models import RewriteInput, RewriteOutput
 from decision_engine import router as decision_engine_router
 from visual_trust_engine import analyze_visual_trust_from_path
+# TensorFlow removed - no model loading needed
+from routes.image_trust_local import router as image_trust_local_router
 from routes.image_trust import router as image_trust_router
 from routes.training_landing_friction import router as landing_friction_training_router
+from routes.analyze_url import router as analyze_url_router
+from routes.debug_screenshot import router as debug_screenshot_router
+from routes.debug import router as debug_router
+from routes.brain_features import router as brain_features_router
+from routes.explain import router as explain_router
 
 # Import pricing packages
 try:
@@ -133,6 +162,37 @@ def load_psychology_finetune_model_id() -> str:
 # Initialize FastAPI app
 app = FastAPI(title="Nima AI Brain API", version="1.0.0")
 
+# Startup event: Log environment configuration
+@app.on_event("startup")
+async def startup_event():
+    """Log environment configuration on startup."""
+    import logging
+    logger = logging.getLogger("brain")
+    
+    try:
+        from api.core.config import get_main_brain_backend_url, is_local_dev
+        backend_url = get_main_brain_backend_url()
+        env_type = "local-dev" if is_local_dev() else "production"
+        logger.info(f"Loaded ENV. MAIN_BRAIN_BACKEND_URL={backend_url} (env={env_type})")
+        print(f"✅ Loaded ENV. MAIN_BRAIN_BACKEND_URL={backend_url} (env={env_type})")
+    except RuntimeError as e:
+        # In local dev, this should never happen (fallback is provided)
+        # But if it does, log it and continue - don't crash the server
+        from api.core.config import is_local_dev
+        if is_local_dev():
+            # This shouldn't happen, but if it does, use fallback
+            logger.warning(f"Backend URL config issue (should use fallback): {e}")
+            print(f"⚠️  Backend URL config issue (using local fallback): {e}")
+        else:
+            # Production: log error but don't crash - let endpoints handle it
+            logger.error(f"Backend URL configuration error: {e}")
+            print(f"❌ Backend URL configuration error: {e}")
+            print("   Server will start, but endpoints may fail if backend URL is needed.")
+    except Exception as e:
+        logger.warning(f"Could not load backend URL config: {e}")
+        print(f"⚠️  Could not load backend URL config: {e}")
+        print("   Server will continue, but some features may not work.")
+
 # Add CORS middleware
 # Production: allow frontend domains
 # Development: allow localhost for local testing
@@ -142,21 +202,37 @@ origins = [
     "https://nima-ai-marketing.onrender.com",  # Render deployment
     # Railway deployment: Add your Railway domain here after deploy
     # Example: "https://your-app-name.up.railway.app"
-    "http://localhost:3000",  # DEV: local development
-    "http://127.0.0.1:3000",  # DEV: local development
+    "http://localhost:3000",  # DEV: Next.js default port
+    "http://127.0.0.1:3000",  # DEV: Next.js default port
+    "http://localhost:3001",  # DEV: Alternative Next.js port
+    "http://127.0.0.1:3001",  # DEV: Alternative Next.js port
     "http://localhost:8000",  # DEV: local development
     "http://127.0.0.1:8000",  # DEV: local development
     "http://localhost:8080",  # DEV: local frontend server
     "http://127.0.0.1:8080",  # DEV: local frontend server
 ]
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+# In local development, allow all localhost origins for flexibility
+from api.core.config import is_local_dev
+if is_local_dev():
+    # In local dev, allow all origins for easier development
+    # This allows any localhost port to connect
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],  # Allow all origins in local dev
+        allow_credentials=False,  # Must be False when allow_origins is ["*"]
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    # Production: use specific allowed origins
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 # Exception handler for validation errors (422)
 @app.exception_handler(RequestValidationError)
@@ -319,7 +395,13 @@ def include_dataset_router(app: FastAPI) -> None:
 
 include_dataset_router(app)
 app.include_router(image_trust_router, prefix="/api/analyze/image-trust", tags=["image-trust"])
+app.include_router(image_trust_local_router)
 app.include_router(landing_friction_training_router)
+app.include_router(analyze_url_router)
+app.include_router(debug_screenshot_router)
+app.include_router(debug_router)
+app.include_router(brain_features_router)
+app.include_router(explain_router, prefix="", tags=["Explanation"])
 app.include_router(
     decision_engine_router,
     prefix="/api/brain",
@@ -331,81 +413,7 @@ app.include_router(
 # Local Image Model Helpers (wired to real visual trust model)
 # ====================================================
 
-_image_model = None
-
-
-def get_image_model():
-    """
-    Lazily load and cache the real visual trust image model used for image_score.
-
-    This reuses the same TensorFlow/Keras model that powers the visual trust engine.
-    """
-    global _image_model
-    logger = logging.getLogger("brain")
-
-    if _image_model is None:
-        logger.warning("🧠 Loading visual trust image model for the first time...")
-        # Import inside the function to avoid circular imports at module load time
-        from visual_trust_engine import _load_model  # type: ignore
-
-        _image_model = _load_model()
-        logger.warning("🧠 Visual trust image model loaded and cached.")
-
-    return _image_model
-
-
-def compute_image_score_from_bytes(data: bytes) -> Optional[float]:
-    """
-    Use Nima's local image model to compute an image score.
-
-    Returns:
-        score in 0–100 range, or None if scoring fails.
-    """
-    logger = logging.getLogger("brain")
-    try:
-        # Ensure the underlying visual trust model is loaded (cached globally)
-        model = get_image_model()
-        _ = model  # prevent linter warnings if unused directly here
-
-        # To stay perfectly aligned with the visual_trust_engine preprocessing and scoring,
-        # we write the bytes to a temporary file and call analyze_visual_trust_from_path.
-        from visual_trust_engine import analyze_visual_trust_from_path
-
-        project_root = Path(__file__).parent.parent
-        tmp_dir = project_root / "dataset" / "tmp_image_score"
-        tmp_dir.mkdir(parents=True, exist_ok=True)
-
-        tmp_path = tmp_dir / f"image_score_{uuid4().hex}.jpg"
-
-        with tmp_path.open("wb") as f:
-            f.write(data)
-
-        vt = analyze_visual_trust_from_path(str(tmp_path))
-
-        raw_score = float(vt.get("trust_score_numeric"))
-
-        # raw_score is already designed as a 0–100 style numeric trust score
-        score = raw_score
-
-        # Clip defensively to [0, 100]
-        if score < 0.0:
-            score = 0.0
-        elif score > 100.0:
-            score = 100.0
-
-        logger.warning("🧠 Real image model raw_score=%s, score(0–100)=%s", raw_score, score)
-        return float(score)
-    except Exception as e:
-        logger.error("Error computing image score: %s", e, exc_info=True)
-        return None
-    finally:
-        # Best-effort cleanup of the temporary file
-        try:
-            if "tmp_path" in locals() and tmp_path.exists():
-                tmp_path.unlink()
-        except Exception:
-            # Non-fatal if cleanup fails
-            pass
+# TensorFlow model loading removed - using OpenCV + local extractor only
 
 
 # Temporarily disabled - VisualTrustResult import removed
@@ -620,8 +628,8 @@ def compute_image_score_from_bytes(data: bytes) -> Optional[float]:
 #     notes: Optional[str] = None,
 #     error: Optional[str] = None,
 # ) -> VisualTrustResult:
-    """
-#    Build a unified VisualTrustResult from various visual trust data sources.
+#     """
+#     Build a unified VisualTrustResult from various visual trust data sources.
     
 #    Args:
 #        trust_label: Trust label from model ("low", "medium", "high")
@@ -736,7 +744,7 @@ def _safe_visual_trust_analysis(
     except FileNotFoundError as err:
         logger.exception("Visual trust model not found: %s", err)
         response = base_response.copy()
-        response["error"] = "visual_trust_model_missing"
+        response["error"] = "visual_trust_analysis_unavailable"
         return response
     except Exception as err:
         logger.exception("Visual trust analysis failed: %s", err)
@@ -760,6 +768,7 @@ print("NIMA AI BRAIN API - Starting...")
 print("=" * 60)
 print(f"System Prompt Length: {len(SYSTEM_PROMPT)} characters")
 print(f"Quality Engine: {'Enabled' if QUALITY_ENGINE_ENABLED else 'Disabled'}")
+print("VisualTrust: Using OpenCV + local extractor (no TensorFlow)")
 print("=" * 60)
 
 
@@ -955,10 +964,11 @@ async def brain_endpoint(
                 # Reset file cursor for further processing
                 image.file = io.BytesIO(image_data)
                 
-                # Compute local image score using Nima's image model (stubbed for now)
+                # Image score computation removed (TensorFlow dependency removed)
+                # Using OpenCV + local extractor for visual trust analysis instead
                 if image_size_bytes > 0:
-                    image_score = compute_image_score_from_bytes(image_data)
-                    logger.warning("🧠 Local image_score (from model): %s", image_score)
+                    image_score = None  # Not computed (TensorFlow removed)
+                    logger.info("🧠 Image score computation disabled (TensorFlow removed)")
                 else:
                     logger.warning("⚠ Empty image data; image_score will be None")
                 
@@ -987,10 +997,10 @@ async def brain_endpoint(
                     logger.warning("📸 Image received from form_data: filename=%s, size=%d bytes", image_filename, image_size_bytes)
                     logger.warning("🔍 First 50 bytes: %s", image_data[:50])
                     
-                    # Compute local image score using Nima's image model (stubbed for now)
+                    # Image score computation removed (TensorFlow dependency removed)
                     if image_size_bytes > 0:
-                        image_score = compute_image_score_from_bytes(image_data)
-                        logger.warning("🧠 Local image_score (from model): %s", image_score)
+                        image_score = None  # Not computed (TensorFlow removed)
+                        logger.info("🧠 Image score computation disabled (TensorFlow removed)")
                     else:
                         logger.warning("⚠ Empty image data from form_data; image_score will be None")
                     
@@ -1209,6 +1219,21 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/debug/env")
+def debug_env():
+    """
+    Debug endpoint to show environment configuration (local dev only).
+    
+    Returns 404 in production for security.
+    """
+    from api.core.config import is_local_dev, get_debug_env_info
+    
+    if not is_local_dev():
+        raise HTTPException(status_code=404, detail="Not found")
+    
+    return get_debug_env_info()
+
+
 @app.get("/api/packages")
 async def get_packages():
     """
@@ -1331,6 +1356,43 @@ async def cognitive_friction_endpoint(
     import json as json_lib
     logger = logging.getLogger("brain")
     
+    # Wrap entire endpoint in timeout (120 seconds total)
+    try:
+        return await asyncio.wait_for(
+            _cognitive_friction_endpoint_internal(
+                request, raw_text, platform, goal, audience, language, url, image, use_trained_model
+            ),
+            timeout=120.0
+        )
+    except asyncio.TimeoutError:
+        logger.error("Cognitive friction endpoint timed out after 120 seconds")
+        raise HTTPException(
+            status_code=504,
+            detail=(
+                "Request timed out. The analysis took too long to complete.\n\n"
+                "This can happen if:\n"
+                "- The website is slow to scrape\n"
+                "- The AI model is taking longer than expected\n\n"
+                "SOLUTION: Please try again, or paste the page content directly instead of using a URL."
+            )
+        )
+
+
+async def _cognitive_friction_endpoint_internal(
+    request: Request,
+    raw_text: Optional[str],
+    platform: Optional[str],
+    goal: Optional[str],
+    audience: Optional[str],
+    language: Optional[str],
+    url: Optional[str],
+    image: Optional[UploadFile],
+    use_trained_model: Optional[str],
+):
+    """Internal implementation of cognitive friction endpoint."""
+    import json as json_lib
+    logger = logging.getLogger("brain")
+    
     try:
         # Parse request body
         content_type = request.headers.get("content-type", "")
@@ -1367,7 +1429,7 @@ async def cognitive_friction_endpoint(
                 try:
                     image_data = base64.b64decode(image_base64)
                     if len(image_data) > 0:
-                        image_score_value = compute_image_score_from_bytes(image_data)
+                        image_score_value = None  # Not computed (TensorFlow removed)
                 except Exception:
                     pass  # Continue without image score
             
@@ -1542,7 +1604,7 @@ async def cognitive_friction_endpoint(
                 image_mime = image.content_type or "image/png"
                 
                 if len(image_data) > 0:
-                    image_score_value = compute_image_score_from_bytes(image_data)
+                    image_score_value = None  # Not computed (TensorFlow removed)
             
             if use_trained_model:
                 if isinstance(use_trained_model, str):
@@ -1590,10 +1652,29 @@ async def cognitive_friction_endpoint(
                 print(f"[/api/brain/cognitive-friction] 🔍 Attempting to scrape URL: {url_to_scrape}")
                 try:
                     from utils.decision_snapshot_extractor import extract_decision_snapshot, format_snapshot_text
-                    snapshot = await extract_decision_snapshot(url_to_scrape)  # AWAIT async call
+                    # Add timeout to scraping (45 seconds max)
+                    snapshot = await asyncio.wait_for(
+                        extract_decision_snapshot(url_to_scrape),
+                        timeout=45.0
+                    )
                     scraped_text = format_snapshot_text(snapshot)
                     input_data.raw_text = scraped_text
                     print(f"[/api/brain/cognitive-friction] ✅ Successfully scraped {len(scraped_text)} characters from URL")
+                except asyncio.TimeoutError:
+                    error_msg = "URL scraping timed out after 45 seconds. The website may be slow or blocking automated access."
+                    print(f"[/api/brain/cognitive-friction] ❌ Scraping timeout: {error_msg}")
+                    raise HTTPException(
+                        status_code=408,
+                        detail=(
+                            f"{error_msg}\n\n"
+                            "SOLUTION: Please manually copy and paste the page content:\n"
+                            "- Hero headline\n"
+                            "- CTA button text\n"
+                            "- Price (if visible)\n"
+                            "- Guarantee/refund information\n\n"
+                            "Then paste this content in the 'Page Copy' field instead of using the URL."
+                        )
+                    )
                 except Exception as scrape_err:
                     error_msg = str(scrape_err)
                     print(f"[/api/brain/cognitive-friction] ❌ Scraping failed: {error_msg}")
@@ -1625,14 +1706,50 @@ async def cognitive_friction_endpoint(
             except ValueError as err:
                 raise HTTPException(status_code=400, detail=str(err)) from err
         
-        # Run analysis
-        result = analyze_cognitive_friction(
-            input_data,
-            image_base64=image_base64,
-            image_mime=image_mime,
-            image_score=image_score_value,
-            model_override=finetuned_model_id,
-        )
+        # Run analysis with timeout (90 seconds max for the entire analysis)
+        # analyze_cognitive_friction is a sync function, so we run it in a thread
+        try:
+            if hasattr(asyncio, 'to_thread'):
+                # Python 3.9+
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        analyze_cognitive_friction,
+                        input_data,
+                        image_base64=image_base64,
+                        image_mime=image_mime,
+                        image_score=image_score_value,
+                        model_override=finetuned_model_id,
+                    ),
+                    timeout=90.0
+                )
+            else:
+                # Python < 3.9
+                loop = asyncio.get_event_loop()
+                result = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        lambda: analyze_cognitive_friction(
+                            input_data,
+                            image_base64=image_base64,
+                            image_mime=image_mime,
+                            image_score=image_score_value,
+                            model_override=finetuned_model_id,
+                        )
+                    ),
+                    timeout=90.0
+                )
+        except asyncio.TimeoutError:
+            logger.error("Cognitive friction analysis timed out after 90 seconds")
+            raise HTTPException(
+                status_code=504,
+                detail=(
+                    "Analysis timed out. The request took too long to process.\n\n"
+                    "This can happen if:\n"
+                    "- The website is slow to scrape\n"
+                    "- The AI model is taking longer than expected\n\n"
+                    "SOLUTION: Please try again, or paste the page content directly instead of using a URL."
+                )
+            )
         
         # Add advanced psychology analysis if text is available
         if has_text:
@@ -1893,7 +2010,7 @@ async def psychology_analysis_with_image(
             # Model not trained or file issue: surface as 400 so user can fix setup
             error_msg = str(e)
             print(f"\n❌ FileNotFoundError in visual analysis: {error_msg}")
-            if "model not found" in error_msg.lower() or "visual_trust_model" in error_msg.lower():
+            if "model not found" in error_msg.lower() or "visual_trust_model" in error_msg.lower() or "visual_trust_analysis" in error_msg.lower():
                 # Model not trained - provide helpful message
                 visual_trust = {
                     "error": "Visual trust model not trained. The text analysis completed successfully, but visual analysis requires training the model first.",
@@ -1902,7 +2019,7 @@ async def psychology_analysis_with_image(
                 visual_layer = {
                     "visual_trust_label": "N/A",
                     "visual_trust_score": None,
-                    "visual_comment": "Visual trust model is not available. Please train the model first using: python training/train_visual_trust_model.py"
+                    "visual_comment": "Visual trust analysis uses OpenCV + local extractor (no TensorFlow model required)"
                 }
                 # Build fallback VisualTrustResult - Temporarily disabled
                 # visual_trust_result = _build_visual_trust_result(

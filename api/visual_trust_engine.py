@@ -4,7 +4,7 @@ import time
 import traceback
 from typing import Dict, Any
 
-from api.services.image_trust_service import analyze_image_trust_bytes
+from .services.image_trust_service import analyze_image_trust_bytes
 
 logger = logging.getLogger("visual_trust_engine")
 

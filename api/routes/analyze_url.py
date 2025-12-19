@@ -91,7 +91,60 @@ async def render_screenshot(url: str, timeout: int = 30) -> bytes:
 
 
 @router.post("/analyze-url")
-async def analyze_url(payload: UrlAnalyzeIn, refresh: bool = Query(False)):
+async def analyze_url(
+    payload: UrlAnalyzeIn, 
+    refresh: bool = Query(False),
+    explain: bool = Query(False, description="Convert diagnosis to human-readable explanation using AI")
+):
+    """
+    Analyze a URL and return decision diagnosis.
+    
+    Works locally out-of-the-box without requiring MAIN_BRAIN_BACKEND_URL.
+    In production, requires MAIN_BRAIN_BACKEND_URL or BRAIN_BACKEND_URL to be set.
+    
+    If explain=true, the diagnosis will be automatically converted to human-readable
+    explanation using OpenAI (without modifying the diagnosis).
+    """
+    # Check config early and return friendly error if needed (production only)
+    # Note: analyze-url uses local analyze_decision function, but we check config
+    # in case there's any gateway mode or external service dependency
+    try:
+        from api.core.config import get_main_brain_backend_url, is_local_dev
+        # Just check if we can get the URL - in local dev it will use fallback
+        backend_url = get_main_brain_backend_url()
+        # If we're in production and got here, config is OK
+        is_local = is_local_dev()
+    except RuntimeError as e:
+        # Production: return JSON error response
+        from fastapi import HTTPException
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "analysisStatus": "error",
+                "error": {
+                    "message": str(e),
+                    "type": "config_error"
+                }
+            }
+        )
+    except Exception as e:
+        # Other config errors - log but don't fail in local dev
+        from api.core.config import is_local_dev
+        is_local = is_local_dev()
+        if not is_local:
+            from fastapi import HTTPException
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "analysisStatus": "error",
+                    "error": {
+                        "message": f"Configuration error: {str(e)}",
+                        "type": "config_error"
+                    }
+                }
+            )
+        # Local dev: continue with local fallback
+    
     url = payload.url.strip()
     refresh_flag = str(refresh).lower() in {"1", "true", "yes"} or bool(payload.refresh)
 
@@ -360,5 +413,36 @@ async def analyze_url(payload: UrlAnalyzeIn, refresh: bool = Query(False)):
     
     # Apply sanitization to entire response payload (sanitizes all strings recursively)
     response = sanitize_any(response)
+    
+    # If explain=true, generate human-readable explanation
+    if explain:
+        try:
+            logger.info("Generating AI explanation for diagnosis...")
+            from api.routes.explain import _extract_diagnosis_data, _generate_explanation
+            
+            # Extract diagnosis data
+            diagnosis_data = _extract_diagnosis_data(response)
+            logger.debug(f"Extracted diagnosis data keys: {list(diagnosis_data.keys())}")
+            
+            # Generate explanation (default: marketer audience, English)
+            # You can add audience and language as query params if needed
+            explanation = await _generate_explanation(
+                diagnosis_data,
+                audience="marketer",
+                language="en"
+            )
+            
+            # Add explanation to response
+            response["explanation"] = explanation
+            response["hasExplanation"] = True
+            logger.info("✅ Explanation generated successfully")
+            
+        except Exception as e:
+            logger.exception(f"Failed to generate explanation: {e}")
+            # Don't fail the request if explanation fails
+            response["explanation"] = None
+            response["explanationError"] = str(e)
+            response["hasExplanation"] = False
+            response["explanationWarning"] = "Explanation generation failed, but diagnosis is still available."
 
     return response
