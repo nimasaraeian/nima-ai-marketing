@@ -15,11 +15,19 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
 
-import cv2
 import numpy as np
 from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+# Optional OpenCV for image processing
+try:
+    import cv2
+    HAS_OPENCV = True
+except ImportError:
+    HAS_OPENCV = False
+    cv2 = None
+    logger.warning("opencv-python not available - visual extraction will be limited")
 
 # Optional OCR for text extraction
 try:
@@ -553,6 +561,27 @@ def extract_visual_elements(image_bytes: bytes, debug: bool = False) -> Dict:
     """
     if not image_bytes:
         return {"elements": [], "metrics": {}}
+
+    # Fallback if OpenCV is not available
+    if not HAS_OPENCV:
+        logger.warning("OpenCV not available - returning minimal visual extraction")
+        try:
+            img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+            w, h = img.size
+            return {
+                "elements": [],
+                "metrics": {
+                    "edge_density": 0.0,
+                    "text_block_density": 0.0,
+                    "cta_candidates": 0,
+                    "overall_color_palette": [],
+                    "detected_logos_count": 0,
+                },
+                "analysisStatus": "fallback",
+                "error": "opencv_not_available"
+            }
+        except Exception:
+            return {"elements": [], "metrics": {}}
 
     try:
         img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
