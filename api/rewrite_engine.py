@@ -26,7 +26,7 @@ try:
     from models.rewrite_models import RewriteInput, RewriteOutput
 except ImportError:
     # Fallback to absolute import if relative doesn't work
-    from api.models.rewrite_models import RewriteInput, RewriteOutput
+    from .models.rewrite_models import RewriteInput, RewriteOutput
 
 # Load environment variables
 project_root = Path(__file__).parent.parent

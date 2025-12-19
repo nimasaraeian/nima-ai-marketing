@@ -21,7 +21,7 @@ from .text_utils import fix_mojibake
 
 # Import Playwright-based URL renderer (ASYNC ONLY)
 try:
-    from api.utils.url_renderer_async import render_url_with_js
+    from .url_renderer_async import render_url_with_js
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False

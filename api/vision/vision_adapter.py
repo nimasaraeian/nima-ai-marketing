@@ -58,7 +58,7 @@ def analyze_image(image_bytes: bytes) -> Dict[str, Any]:
 
     if provider == "openai":
         try:
-            from api.vision.providers.openai_vision import analyze_image as openai_analyze
+            from .providers.openai_vision import analyze_image as openai_analyze
         except Exception as e:  # noqa: BLE001
             return {
                 "analysisStatus": "unavailable",

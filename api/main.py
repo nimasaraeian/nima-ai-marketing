@@ -27,6 +27,9 @@ else:
 import sys
 import asyncio
 
+# Safety check: Print PYTHONPATH for deployment diagnostics
+print("PYTHONPATH:", sys.path)
+
 if sys.platform.startswith("win"):
     asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
 
@@ -162,7 +165,7 @@ async def startup_event():
     logger = logging.getLogger("brain")
     
     try:
-        from api.core.config import get_main_brain_backend_url, is_local_dev
+        from .core.config import get_main_brain_backend_url, is_local_dev
         backend_url = get_main_brain_backend_url()
         env_type = "local-dev" if is_local_dev() else "production"
         logger.info(f"Loaded ENV. MAIN_BRAIN_BACKEND_URL={backend_url} (env={env_type})")
@@ -170,7 +173,7 @@ async def startup_event():
     except RuntimeError as e:
         # In local dev, this should never happen (fallback is provided)
         # But if it does, log it and continue - don't crash the server
-        from api.core.config import is_local_dev
+        from .core.config import is_local_dev
         if is_local_dev():
             # This shouldn't happen, but if it does, use fallback
             logger.warning(f"Backend URL config issue (should use fallback): {e}")
@@ -1218,7 +1221,7 @@ def debug_env():
     
     Returns 404 in production for security.
     """
-    from api.core.config import is_local_dev, get_debug_env_info
+    from .core.config import is_local_dev, get_debug_env_info
     
     if not is_local_dev():
         raise HTTPException(status_code=404, detail="Not found")
