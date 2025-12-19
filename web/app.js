@@ -1,6 +1,28 @@
-// API Configuration
-const API_BASE_URL = 'http://127.0.0.1:8000';
-// For production, change to: const API_BASE_URL = 'https://api.nimasaraeian.com';
+// API Configuration - Auto-detect based on environment
+function getApiBaseUrl() {
+    // Check if we have an environment variable (set via meta tag or window config)
+    if (window.API_BASE_URL) {
+        return window.API_BASE_URL;
+    }
+    
+    // Check meta tag for API URL
+    const metaApiUrl = document.querySelector('meta[name="api-base-url"]');
+    if (metaApiUrl && metaApiUrl.content) {
+        return metaApiUrl.content;
+    }
+    
+    // Auto-detect: if we're on localhost, use localhost API
+    const hostname = window.location.hostname;
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '') {
+        return 'http://127.0.0.1:8000';
+    }
+    
+    // Production: use same origin (if API is on same domain) or relative URLs
+    // If API is on different subdomain, you can set it via meta tag or window.API_BASE_URL
+    return window.location.origin;
+}
+
+const API_BASE_URL = getApiBaseUrl();
 
 // Helper function to check if server is running
 async function checkServerHealth() {
