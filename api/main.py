@@ -205,7 +205,7 @@ origins = [
 ]
 
 # In local development, allow all localhost origins for flexibility
-from api.core.config import is_local_dev
+from .core.config import is_local_dev
 if is_local_dev():
     # In local dev, allow all origins for easier development
     # This allows any localhost port to connect

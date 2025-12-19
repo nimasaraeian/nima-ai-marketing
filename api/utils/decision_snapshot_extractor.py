@@ -16,6 +16,8 @@ import logging
 from typing import Optional, Dict
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
+import requests
+from .text_utils import fix_mojibake
 
 # Import Playwright-based URL renderer (ASYNC ONLY)
 try:
@@ -23,8 +25,6 @@ try:
     PLAYWRIGHT_AVAILABLE = True
 except ImportError:
     PLAYWRIGHT_AVAILABLE = False
-    # Fallback to requests if Playwright is not available
-    import requests
 
 logger = logging.getLogger("decision_snapshot")
 
@@ -129,7 +129,27 @@ async def extract_decision_snapshot(url: str) -> Dict[str, any]:
                 )
             
             response.raise_for_status()
-            html = response.text
+            
+            # Properly decode HTML content - ROOT FIX
+            # Get bytes first, then detect and decode encoding correctly
+            html_bytes = response.content
+            
+            # Detect encoding from bytes using chardet or apparent_encoding
+            try:
+                import chardet
+                detected = chardet.detect(html_bytes)
+                encoding = detected.get('encoding', response.apparent_encoding)
+                confidence = detected.get('confidence', 0)
+                
+                # Use detected encoding if confidence is high enough
+                if confidence < 0.7:
+                    encoding = response.apparent_encoding or 'utf-8'
+                
+                html = html_bytes.decode(encoding, errors='replace')
+            except ImportError:
+                # If chardet is not available, use requests' apparent_encoding
+                response.encoding = response.apparent_encoding or 'utf-8'
+                html = response.text
         
     except ValueError as ve:
         # Re-raise ValueError (from Playwright or our custom errors) as-is
@@ -158,7 +178,9 @@ async def extract_decision_snapshot(url: str) -> Dict[str, any]:
         raise ValueError(f"Failed to fetch URL: {e}")
     
     try:
-        soup = BeautifulSoup(html, 'html.parser')
+        # BeautifulSoup will handle encoding from the already-decoded string
+        # Use html.parser (more lenient) or lxml (faster, but requires lxml)
+        soup = BeautifulSoup(html, 'html.parser', from_encoding='utf-8')
     except Exception as e:
         raise ValueError(f"Failed to parse HTML: {e}")
     
@@ -186,7 +208,7 @@ async def extract_decision_snapshot(url: str) -> Dict[str, any]:
             if hero_headline:
                 break
     
-    snapshot['hero_headline'] = hero_headline
+    snapshot['hero_headline'] = fix_mojibake(hero_headline) if hero_headline else None
     
     # Hero subheadline - look for subtitle near hero
     hero_subheadline = None
@@ -202,7 +224,7 @@ async def extract_decision_snapshot(url: str) -> Dict[str, any]:
             if hero_subheadline and len(hero_subheadline) < 200:  # Reasonable length
                 break
     
-    snapshot['hero_subheadline'] = hero_subheadline
+    snapshot['hero_subheadline'] = fix_mojibake(hero_subheadline) if hero_subheadline else None
     
     # Primary CTA - look for buttons with common CTA text
     cta = None
@@ -223,7 +245,7 @@ async def extract_decision_snapshot(url: str) -> Dict[str, any]:
         if primary_btn:
             cta = primary_btn.get_text(strip=True)
     
-    snapshot['cta'] = cta
+    snapshot['cta'] = fix_mojibake(cta) if cta else None
     
     # Price - look for price patterns
     price = None
@@ -249,7 +271,7 @@ async def extract_decision_snapshot(url: str) -> Dict[str, any]:
         if price:
             break
     
-    snapshot['price'] = price
+    snapshot['price'] = fix_mojibake(price) if price else None
     
     # Guarantee / Risk text - look for guarantee/refund/cancellation mentions
     guarantee_risk = None
@@ -292,7 +314,7 @@ async def extract_decision_snapshot(url: str) -> Dict[str, any]:
                 guarantee_risk = match.group(0).strip()
                 break
     
-    snapshot['guarantee_risk'] = guarantee_risk
+    snapshot['guarantee_risk'] = fix_mojibake(guarantee_risk) if guarantee_risk else None
     
     # Detect trust signals
     has_free_returns = False
@@ -390,11 +412,18 @@ def format_snapshot_text(snapshot: Dict[str, Optional[str]]) -> str:
     """
     parts = []
     
-    parts.append(f"HERO HEADLINE: {snapshot['hero_headline'] or '[Not visible]'}")
-    parts.append(f"HERO SUBHEADLINE: {snapshot['hero_subheadline'] or '[Not visible]'}")
-    parts.append(f"CTA: {snapshot['cta'] or '[Not visible]'}")
-    parts.append(f"PRICE: {snapshot['price'] or '[Not visible]'}")
-    parts.append(f"GUARANTEE / RISK: {snapshot['guarantee_risk'] or '[Not visible]'}")
+    # Apply fix_mojibake to each field (already fixed in extraction, but double-check for safety)
+    hero_headline = fix_mojibake(snapshot['hero_headline']) if snapshot.get('hero_headline') else None
+    hero_subheadline = fix_mojibake(snapshot['hero_subheadline']) if snapshot.get('hero_subheadline') else None
+    cta = fix_mojibake(snapshot['cta']) if snapshot.get('cta') else None
+    price = fix_mojibake(snapshot['price']) if snapshot.get('price') else None
+    guarantee_risk = fix_mojibake(snapshot['guarantee_risk']) if snapshot.get('guarantee_risk') else None
     
-    return "\n".join(parts)
+    parts.append(f"HERO HEADLINE: {hero_headline or '[Not visible]'}")
+    parts.append(f"HERO SUBHEADLINE: {hero_subheadline or '[Not visible]'}")
+    parts.append(f"CTA: {cta or '[Not visible]'}")
+    parts.append(f"PRICE: {price or '[Not visible]'}")
+    parts.append(f"GUARANTEE / RISK: {guarantee_risk or '[Not visible]'}")
+    
+    return fix_mojibake("\n".join(parts))
 
