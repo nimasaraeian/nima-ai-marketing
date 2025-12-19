@@ -17,17 +17,17 @@ try:
 except Exception:
     Document = None  # type: ignore
 
-from api.schemas.page_features import (
+from ..schemas.page_features import (
     PageFeatures,
     VisualFeatures,
     TextFeatures,
     MetaFeatures,
     FEATURES_SCHEMA_VERSION,
 )
-from api.brain.decision_brain import analyze_decision
-from api.visual_trust_engine import run_visual_trust_from_bytes
-from api.services.screenshot import capture_url_png_bytes
-from api.utils.text_sanitize import sanitize_any
+from ..brain.decision_brain import analyze_decision
+from ..visual_trust_engine import run_visual_trust_from_bytes
+from ..services.screenshot import capture_url_png_bytes
+from ..utils.text_sanitize import sanitize_any
 import asyncio
 
 # Playwright timeout compatibility
@@ -109,7 +109,7 @@ async def analyze_url(
     # Note: analyze-url uses local analyze_decision function, but we check config
     # in case there's any gateway mode or external service dependency
     try:
-        from api.core.config import get_main_brain_backend_url, is_local_dev
+        from ..core.config import get_main_brain_backend_url, is_local_dev
         # Just check if we can get the URL - in local dev it will use fallback
         backend_url = get_main_brain_backend_url()
         # If we're in production and got here, config is OK
@@ -129,7 +129,7 @@ async def analyze_url(
         )
     except Exception as e:
         # Other config errors - log but don't fail in local dev
-        from api.core.config import is_local_dev
+        from ..core.config import is_local_dev
         is_local = is_local_dev()
         if not is_local:
             from fastapi import HTTPException
@@ -418,7 +418,7 @@ async def analyze_url(
     if explain:
         try:
             logger.info("Generating AI explanation for diagnosis...")
-            from api.routes.explain import _extract_diagnosis_data, _generate_explanation
+            from .explain import _extract_diagnosis_data, _generate_explanation
             
             # Extract diagnosis data
             diagnosis_data = _extract_diagnosis_data(response)

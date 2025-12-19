@@ -63,9 +63,9 @@ if os.name == "nt":
         # If reconfigure isn't supported, fall back silently without crashing startup
         pass
 
-from brain_loader import load_brain_memory
-from chat import chat_completion, chat_completion_with_image
-from cognitive_friction_engine import (
+from .brain_loader import load_brain_memory
+from .chat import chat_completion, chat_completion_with_image
+from .cognitive_friction_engine import (
     analyze_cognitive_friction,
     CognitiveFrictionInput,
     CognitiveFrictionResult,
@@ -73,37 +73,29 @@ from cognitive_friction_engine import (
     # VisualTrustAnalysis,  # Temporarily disabled
     # VisualTrustResult,  # Temporarily disabled
 )
-from psychology_engine import (
+from .psychology_engine import (
     analyze_psychology,
     analyze_advanced_psychology,
     PsychologyAnalysisInput,
     PsychologyAnalysisResult
 )
-from rewrite_engine import rewrite_text
-from models.rewrite_models import RewriteInput, RewriteOutput
-from decision_engine import router as decision_engine_router
-from visual_trust_engine import analyze_visual_trust_from_path
+from .rewrite_engine import rewrite_text
+from .models.rewrite_models import RewriteInput, RewriteOutput
+from .decision_engine import router as decision_engine_router
+from .visual_trust_engine import analyze_visual_trust_from_path
 # TensorFlow removed - no model loading needed
-from routes.image_trust_local import router as image_trust_local_router
-from routes.image_trust import router as image_trust_router
-from routes.training_landing_friction import router as landing_friction_training_router
-from routes.analyze_url import router as analyze_url_router
-from routes.debug_screenshot import router as debug_screenshot_router
-from routes.debug import router as debug_router
-from routes.brain_features import router as brain_features_router
-from routes.explain import router as explain_router
+from .routes.image_trust_local import router as image_trust_local_router
+from .routes.image_trust import router as image_trust_router
+from .routes.training_landing_friction import router as landing_friction_training_router
+from .routes.analyze_url import router as analyze_url_router
+from .routes.debug_screenshot import router as debug_screenshot_router
+from .routes.debug import router as debug_router
+from .routes.brain_features import router as brain_features_router
+from .routes.explain import router as explain_router
 
 # Import pricing packages
 try:
-    from config.pricing_packages import get_all_packages, PricingTier
-except ImportError:
-    # Fallback if pricing packages not available
-    get_all_packages = None
-    PricingTier = None
-
-# Import pricing packages
-try:
-    from config.pricing_packages import get_all_packages, PricingTier
+    from .config.pricing_packages import get_all_packages, PricingTier
 except ImportError:
     # Fallback if pricing packages not available
     get_all_packages = None

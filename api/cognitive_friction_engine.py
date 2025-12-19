@@ -23,8 +23,8 @@ from dotenv import load_dotenv
 from pathlib import Path
 from openai import OpenAI
 
-from models.psychology_dashboard import PsychologyDashboard
-from psychology_engine import PsychologyAnalysisResult
+from .models.psychology_dashboard import PsychologyDashboard
+from .psychology_engine import PsychologyAnalysisResult
 
 # Load environment variables
 project_root = Path(__file__).parent.parent
@@ -989,6 +989,10 @@ class VisualTrustResult(BaseModel):
     notes: Optional[str] = Field(
         default=None,
         description="Optional notes explaining the result, especially for 'fallback' or 'unavailable' status."
+    )
+    warnings: List[str] = Field(
+        default_factory=list,
+        description="Non-fatal warnings about the analysis (e.g., partial element extraction)."
     )
     elements: List[VisualElement] = Field(
         default_factory=list,

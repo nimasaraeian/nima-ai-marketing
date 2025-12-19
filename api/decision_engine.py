@@ -21,6 +21,9 @@ from pathlib import Path
 from urllib.parse import urlparse
 from openai import OpenAI
 from fastapi import APIRouter, HTTPException, Query
+import httpx
+from bs4 import BeautifulSoup
+import asyncio
 
 router = APIRouter()
 logger = logging.getLogger("decision_engine")
@@ -1483,7 +1486,7 @@ YOU MUST CHOOSE: Outcome Unclear, Effort Too High, or Commitment Anxiety."""
 # ROUTER ENDPOINT
 # ====================================================
 
-@router.post("/decision-engine", response_model=DecisionEngineOutput)
+@router.post("/decision-engine")
 async def decision_engine_endpoint(input_data: DecisionEngineInput):
     """
     Decision Engine v1 - Product Critical Module
@@ -1562,12 +1565,16 @@ async def decision_engine_endpoint(input_data: DecisionEngineInput):
         # Create new DecisionEngineOutput with context
         result_with_context = DecisionEngineOutput(**result_dict)
         
+        # Convert to dict and add analysisStatus for frontend compatibility
+        response_dict = result_with_context.dict()
+        response_dict["analysisStatus"] = "ok"  # Add analysisStatus field for Next.js frontend
+        
         # DEBUG: Log the source marker if present
         if hasattr(result, 'response_source'):
             logger.info(f"🔍 DEBUG: Returning result with response_source={result.response_source}, blocker={result.decision_blocker}")
         else:
             logger.warning("🔍 DEBUG: Result has no response_source marker! This should not happen.")
-        return result_with_context
+        return response_dict
     except ValueError as e:
         # Validation errors are client errors
         error_msg = str(e)
@@ -1694,5 +1701,224 @@ async def decision_engine_report_endpoint(
         if "403" in error_msg or "forbidden" in error_msg.lower() or "blocks automated access" in error_msg.lower():
             raise HTTPException(status_code=400, detail=error_msg)
         raise HTTPException(status_code=500, detail=f"Decision report generation failed: {error_msg}")
+
+
+class ReportFromUrlInput(BaseModel):
+    """Input for report-from-url endpoint"""
+    url: str = Field(..., description="URL to analyze")
+    refresh: Optional[bool] = Field(False, description="Force refresh, bypass cache")
+    timeoutSec: Optional[int] = Field(45, description="HTTP request timeout in seconds")
+
+
+def _extract_content_from_html(html: str, max_chars: int = 6000) -> str:
+    """
+    Extract meaningful content from HTML:
+    - Title and meta description
+    - h1/h2/h3 headings
+    - Body visible text (strip script/style/nav/footer)
+    """
+    # BeautifulSoup will handle encoding from the already-decoded string
+    soup = BeautifulSoup(html, "lxml", from_encoding="utf-8")
+    
+    # Remove script, style, nav, footer
+    for tag in soup(["script", "style", "nav", "footer", "header"]):
+        tag.decompose()
+    
+    parts = []
+    
+    # Title
+    title_tag = soup.find("title")
+    if title_tag:
+        parts.append(f"Title: {title_tag.get_text(strip=True)}")
+    
+    # Meta description
+    meta_desc = soup.find("meta", attrs={"name": "description"})
+    if meta_desc and meta_desc.get("content"):
+        parts.append(f"Meta Description: {meta_desc.get('content')}")
+    
+    # Headings
+    for heading in soup.find_all(["h1", "h2", "h3"]):
+        text = heading.get_text(strip=True)
+        if text:
+            parts.append(text)
+    
+    # Body text
+    body = soup.find("body")
+    if body:
+        body_text = body.get_text(separator="\n", strip=True)
+        # Clean up excessive whitespace
+        lines = [line.strip() for line in body_text.splitlines() if line.strip()]
+        body_clean = "\n".join(lines)
+        parts.append(body_clean)
+    
+    # Combine and limit
+    combined = "\n\n".join(parts)
+    if len(combined) > max_chars:
+        combined = combined[:max_chars] + "..."
+    
+    return combined
+
+
+@router.post("/decision-engine/report-from-url")
+async def decision_engine_report_from_url(payload: ReportFromUrlInput):
+    """
+    Generate decision engine report from URL.
+    
+    Automatically:
+    1. Fetches HTML from URL
+    2. Extracts content (title, meta, headings, body text)
+    3. Captures screenshot
+    4. Runs visual trust analysis
+    5. Generates decision report
+    
+    Returns report with analysisStatus, url, contentPreview, visualTrust, and decisionReport.
+    """
+    url = payload.url.strip()
+    timeout_sec = payload.timeoutSec or 45
+    
+    # Validate URL
+    if not url or not isinstance(url, str):
+        return {
+            "analysisStatus": "error",
+            "step": "validation",
+            "errorMessage": "url must be a non-empty string"
+        }
+    
+    if not url.startswith(("http://", "https://")):
+        return {
+            "analysisStatus": "error",
+            "step": "validation",
+            "errorMessage": "url must start with http:// or https://"
+        }
+    
+    # Step 1: Fetch HTML
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=timeout_sec) as client:
+            response = await client.get(
+                url,
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
+            )
+            response.raise_for_status()
+            
+            # Properly decode HTML content - ROOT FIX
+            # Get bytes first, then detect and decode encoding correctly
+            html_bytes = response.content
+            
+            # Detect encoding from bytes
+            try:
+                import chardet
+                detected = chardet.detect(html_bytes)
+                encoding = detected.get('encoding', 'utf-8')
+                confidence = detected.get('confidence', 0)
+                
+                # Use detected encoding if confidence is high enough, otherwise fallback
+                if confidence < 0.7:
+                    # Try to get encoding from response headers first
+                    if response.encoding and response.encoding.lower() != 'iso-8859-1':  # iso-8859-1 is often wrong default
+                        encoding = response.encoding
+                    else:
+                        encoding = 'utf-8'
+                
+                # Decode with detected/selected encoding
+                html_content = html_bytes.decode(encoding, errors='replace')
+            except ImportError:
+                # If chardet is not available, use httpx's encoding detection
+                if response.encoding:
+                    html_content = html_bytes.decode(response.encoding, errors='replace')
+                else:
+                    # Fallback to UTF-8
+                    html_content = html_bytes.decode('utf-8', errors='replace')
+    except Exception as e:
+        logger.exception(f"Failed to fetch URL: {e}")
+        return {
+            "analysisStatus": "error",
+            "step": "fetch",
+            "errorMessage": f"Failed to fetch URL: {str(e)[:200]}"
+        }
+    
+    # Step 2: Extract content
+    try:
+        extracted_content = _extract_content_from_html(html_content, max_chars=6000)
+        content_preview = extracted_content[:200] + "..." if len(extracted_content) > 200 else extracted_content
+    except Exception as e:
+        logger.exception(f"Failed to extract content: {e}")
+        return {
+            "analysisStatus": "error",
+            "step": "extract",
+            "errorMessage": f"Failed to extract content: {str(e)[:200]}"
+        }
+    
+    # Step 3: Capture screenshot (using internal function, not HTTP)
+    try:
+        from api.routes.debug_screenshot import capture_url_png_bytes
+        screenshot_bytes = await asyncio.to_thread(capture_url_png_bytes, url)
+    except Exception as e:
+        logger.exception(f"Failed to capture screenshot: {e}")
+        return {
+            "analysisStatus": "error",
+            "step": "screenshot",
+            "errorMessage": f"Failed to capture screenshot: {str(e)[:200]}"
+        }
+    
+    # Step 4: Run visual trust analysis (using internal function, not HTTP)
+    try:
+        from .visual_trust_engine import run_visual_trust_from_bytes
+        visual_trust_result = run_visual_trust_from_bytes(screenshot_bytes)
+    except Exception as e:
+        logger.exception(f"Failed to analyze visual trust: {e}")
+        return {
+            "analysisStatus": "error",
+            "step": "vision",
+            "errorMessage": f"Failed to analyze visual trust: {str(e)[:200]}"
+        }
+    
+    # Step 5: Build payload and call decision engine report internally
+    try:
+        # Detect platform
+        platform = detect_platform_from_url(url)
+        channel = "marketplace_product" if platform == "amazon_product_page" else "generic_saas"
+        
+        # Create DecisionEngineInput
+        decision_input = DecisionEngineInput(
+            content=extracted_content,
+            url=url,
+            channel=channel
+        )
+        
+        # Call decision engine report function internally
+        decision_result = await analyze_decision_failure(decision_input)
+        decision_output = decision_result.dict()
+        
+        # Format report (similar to report endpoint)
+        try:
+            from utils.client_report_formatter import format_decision_report
+            context_data = {
+                "url": url,
+                "platform": platform,
+                "source": "url-pipeline"
+            }
+            report_text = format_decision_report(decision_output, context_data)
+        except Exception:
+            # If formatter fails, use raw output
+            report_text = json.dumps(decision_output, indent=2)
+        
+        return {
+            "analysisStatus": "ok",
+            "url": url,
+            "contentPreview": content_preview,
+            "visualTrust": visual_trust_result,
+            "decisionReport": {
+                "report": report_text,
+                "raw_analysis": decision_output,
+                "format": "markdown"
+            }
+        }
+    except Exception as e:
+        logger.exception(f"Failed to generate decision report: {e}")
+        return {
+            "analysisStatus": "error",
+            "step": "report",
+            "errorMessage": f"Failed to generate decision report: {str(e)[:200]}"
+        }
 
 
