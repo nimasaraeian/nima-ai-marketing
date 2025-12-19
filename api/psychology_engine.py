@@ -33,7 +33,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 from openai import OpenAI
 
-from json_utils import safe_parse_json
+from .json_utils import safe_parse_json
 
 # Load environment variables
 project_root = Path(__file__).parent.parent
@@ -4773,6 +4773,14 @@ def analyze_advanced_psychology(
             response_format={"type": "json_object"},
         )
         raw_content = response.choices[0].message.content
+        Path('last_psychology_raw.txt').write_text(raw_content or '', encoding='utf-8')
+        print('RAW_SAVED last_psychology_raw.txt size=', len(raw_content or ''))
+        print('=== RAW MODEL OUTPUT START ===')
+        print(raw_content[:1500])
+        print('=== RAW MODEL OUTPUT END ===')
+        print('=== RAW MODEL OUTPUT START ===')
+        print(raw_content[:1500])
+        print('=== RAW MODEL OUTPUT END ===')
         payload = safe_parse_json(raw_content, context="advanced psychological view")
         view = AdvancedPsychologicalView(**payload)
         return view
@@ -4898,13 +4906,20 @@ VIOLATION OF REWRITE SAFETY RULES IS UNACCEPTABLE.{visual_mode_context}"""
         ]
         
         response = client.chat.completions.create(
-            model="gpt-4o",
+            model="gpt-4o-mini",
             messages=messages,
             temperature=0.3,  # Lower temperature for more consistent analysis
+            max_tokens=900,  # hard cap to prevent TPM explosions
             response_format={"type": "json_object"}  # Force JSON response
         )
         
         raw_content = response.choices[0].message.content
+        print('=== RAW MODEL OUTPUT START ===')
+        print(raw_content[:1500])
+        print('=== RAW MODEL OUTPUT END ===')
+        print('=== RAW MODEL OUTPUT START ===')
+        print(raw_content[:1500])
+        print('=== RAW MODEL OUTPUT END ===')
         
         # Parse JSON response safely
         try:
@@ -5039,6 +5054,12 @@ VIOLATION OF REWRITE SAFETY RULES IS UNACCEPTABLE.{visual_mode_context}"""
             error_msg = str(e)
             print(f"⚠️ JSON parsing error in psychology analysis: {error_msg}")
             print(f"⚠️ Raw response preview: {raw_content[:500]}")
+            Path("last_psychology_raw.txt").write_text(raw_content or "", encoding="utf-8")
+            print("Saved raw model output to last_psychology_raw.txt")
+            Path('last_psychology_raw.txt').write_text(raw_content or '', encoding='utf-8')
+            print('Saved raw model output to last_psychology_raw.txt')
+            Path('last_psychology_raw.txt').write_text(raw_content or '', encoding='utf-8')
+            print('Saved raw model output to last_psychology_raw.txt')
             # Check if this is the specific "No number after minus sign" error
             if "No number after minus sign" in error_msg or raw_content.strip().startswith("-"):
                 print(f"⚠️ Model returned markdown/bullet points instead of JSON!")
