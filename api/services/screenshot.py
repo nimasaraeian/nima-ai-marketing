@@ -49,3 +49,8 @@ def capture_url_png_bytes(url: str) -> bytes:
 
 
 
+
+
+
+
+

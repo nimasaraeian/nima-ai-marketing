@@ -9,7 +9,8 @@ import os
 
 import httpx
 from bs4 import BeautifulSoup
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Query, HTTPException
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 try:
@@ -28,6 +29,10 @@ from ..brain.decision_brain import analyze_decision
 from ..visual_trust_engine import run_visual_trust_from_bytes
 from ..services.screenshot import capture_url_png_bytes
 from ..utils.text_sanitize import sanitize_any
+from ..services.signal_detector_v1 import build_signal_report_v1
+from ..services.decision_logic_v1 import build_decision_logic_v1
+from ..services.page_capture import capture_page_artifacts
+from ..services.page_extract import extract_page_map
 import asyncio
 
 # Playwright timeout compatibility
@@ -445,4 +450,344 @@ async def analyze_url(
             response["hasExplanation"] = False
             response["explanationWarning"] = "Explanation generation failed, but diagnosis is still available."
 
-    return response
+    # Return JSONResponse with explicit UTF-8 charset
+    return JSONResponse(
+        content=response,
+        media_type="application/json; charset=utf-8"
+    )
+
+
+@router.post("/api/analyze/url-signals")
+async def analyze_url_signals(payload: UrlAnalyzeIn):
+    """
+    Analyze a URL and return Phase 1 signal detection (JSON only, no human report).
+    
+    This endpoint:
+    - Captures page artifacts (screenshots, DOM)
+    - Extracts features (visual, text, meta)
+    - Runs visual trust analysis
+    - Builds signal report v1 (CTA, trust, clarity signals)
+    - Returns JSON only (no verdict, quick wins, or suggested rewrites)
+    """
+    url = payload.url.strip()
+    
+    # 1) Capture page artifacts (screenshots + DOM)
+    capture = None
+    dom_data = None
+    try:
+        capture = await capture_page_artifacts(url)
+        if capture:
+            dom_data = extract_page_map(capture)
+    except Exception as e:
+        logger.exception("Page capture failed: %s", e)
+        capture = {}
+        dom_data = {}
+    
+    # 2) Get screenshot for visual trust
+    shot: bytes = b""
+    visual = None
+    try:
+        shot = await render_screenshot(url, timeout=30)
+        if shot and shot.startswith(b"\x89PNG") and len(shot) > 100:
+            try:
+                raw_visual = await asyncio.wait_for(
+                    asyncio.to_thread(run_visual_trust_from_bytes, shot),
+                    timeout=30.0
+                )
+                if isinstance(raw_visual, dict):
+                    # Pass full visual trust result (includes elements, narrative, warnings)
+                    visual = raw_visual.copy()
+                    visual["screenshot_used"] = True
+                else:
+                    visual = {"screenshot_used": False}
+            except Exception as e:
+                logger.exception("Visual trust analysis failed: %s", e)
+                visual = {"screenshot_used": False}
+    except Exception as e:
+        logger.exception("Screenshot capture failed: %s", e)
+        visual = {"screenshot_used": False}
+    
+    # 3) Extract features (similar to analyze_url endpoint)
+    extracted_text = ""
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=25) as client:
+            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            r.raise_for_status()
+            
+            html_bytes = r.content
+            try:
+                import chardet
+                detected = chardet.detect(html_bytes)
+                encoding = detected.get('encoding', 'utf-8')
+                if detected.get('confidence', 0) < 0.7:
+                    encoding = r.encoding or 'utf-8'
+                html = html_bytes.decode(encoding, errors='replace')
+            except ImportError:
+                html = html_bytes.decode(r.encoding or 'utf-8', errors='replace')
+            
+            extracted_text = extract_text(html)
+    except Exception as e:
+        logger.exception("HTML fetch failed: %s", e)
+    
+    # 4) Build VisualFeatures (simplified)
+    text_lower = extracted_text.lower()
+    vf = {
+        "hero_headline": None,
+        "subheadline": None,
+        "primary_cta_text": "Get Started" if "get started" in text_lower else None,
+        "primary_cta_position": "hero_or_top" if "get started" in text_lower else None,
+        "has_pricing": "pricing" in text_lower or "$" in extracted_text,
+        "has_testimonials": '"' in extracted_text or "testimonial" in text_lower,
+        "has_logos": "fortune 500" in text_lower or "trusted by" in text_lower,
+        "has_guarantee": "guarantee" in text_lower or "money back" in text_lower,
+    }
+    
+    # 5) Build features dict
+    features = {
+        "visual": vf,
+        "text": {
+            "key_lines": [l for l in extracted_text.splitlines() if l.strip()][:10],
+        },
+        "meta": {
+            "url": url,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+    }
+    
+    # 6) Prepare DOM data for signal detector
+    # Convert page_map CTAs to format expected by signal_detector_v1
+    # Use the new fields from page_extract: kind, location, bucket
+    dom_ctas = []
+    if dom_data and isinstance(dom_data, dict):
+        page_map_ctas = dom_data.get("ctas", [])
+        for cta in page_map_ctas:
+            if isinstance(cta, dict):
+                dom_ctas.append({
+                    "text": cta.get("text") or cta.get("label", ""),  # Prefer "text", fallback to "label"
+                    "href": cta.get("href", ""),
+                    "location": cta.get("location", "unknown"),  # Use location from page_extract
+                    "kind": cta.get("kind", "unknown"),  # Use kind from page_extract
+                    "bucket": cta.get("bucket", "secondary")  # Include bucket for categorization
+                })
+    
+    dom_for_signals = {
+        "ctas": dom_ctas,
+        "has_contact": "contact" in text_lower or "@" in extracted_text,
+        "hero_headline": dom_data.get("hero_headline") if dom_data else None,
+        "subheadline": dom_data.get("subheadline") if dom_data else None,
+    }
+    
+    # 7) Build signal report
+    try:
+        signal_report = build_signal_report_v1(
+            url=url,
+            input_type="url",
+            features=features,
+            visual=visual or {},
+            dom=dom_for_signals
+        )
+        
+        # Return JSONResponse with explicit UTF-8 charset
+        return JSONResponse(
+            content=signal_report.dict(),
+            media_type="application/json; charset=utf-8"
+        )
+    except Exception as e:
+        logger.exception("Signal report build failed: %s", e)
+        import traceback
+        error_detail = str(e)
+        error_type = type(e).__name__
+        # Return a debug-friendly error response instead of raising HTTPException
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": True,
+                "error_type": error_type,
+                "error_message": error_detail,
+                "url": url,
+                "debug": {
+                    "capture_available": capture is not None,
+                    "dom_data_available": dom_data is not None,
+                    "visual_available": visual is not None,
+                    "features_available": bool(features),
+                }
+            },
+            media_type="application/json; charset=utf-8"
+        )
+
+
+@router.post("/api/analyze/url-decision")
+async def analyze_url_decision(payload: UrlAnalyzeIn):
+    """
+    Analyze a URL and return Phase 2 decision logic (blockers, scores, decision probability).
+    
+    This endpoint:
+    - Captures page artifacts (screenshots, DOM)
+    - Extracts features (visual, text, meta)
+    - Runs visual trust analysis
+    - Builds signal report v1 (Phase 1)
+    - Builds decision logic v1 (Phase 2) with blockers and scores
+    - Returns JSON with decision probability and transparent weights/inputs
+    """
+    url = payload.url.strip()
+    
+    # 1) Capture page artifacts (screenshots + DOM)
+    capture = None
+    dom_data = None
+    try:
+        capture = await capture_page_artifacts(url)
+        if capture:
+            dom_data = extract_page_map(capture)
+    except Exception as e:
+        logger.exception("Page capture failed: %s", e)
+        capture = {}
+        dom_data = {}
+    
+    # 2) Get screenshot for visual trust
+    shot: bytes = b""
+    visual = None
+    try:
+        shot = await render_screenshot(url, timeout=30)
+        if shot and shot.startswith(b"\x89PNG") and len(shot) > 100:
+            try:
+                raw_visual = await asyncio.wait_for(
+                    asyncio.to_thread(run_visual_trust_from_bytes, shot),
+                    timeout=30.0
+                )
+                if isinstance(raw_visual, dict):
+                    # Pass full visual trust result (includes elements, narrative, warnings)
+                    visual = raw_visual.copy()
+                    visual["screenshot_used"] = True
+                else:
+                    visual = {"screenshot_used": False}
+            except Exception as e:
+                logger.exception("Visual trust analysis failed: %s", e)
+                visual = {"screenshot_used": False}
+    except Exception as e:
+        logger.exception("Screenshot capture failed: %s", e)
+        visual = {"screenshot_used": False}
+    
+    # 3) Extract features (similar to analyze_url endpoint)
+    extracted_text = ""
+    try:
+        async with httpx.AsyncClient(follow_redirects=True, timeout=25) as client:
+            r = await client.get(url, headers={"User-Agent": "Mozilla/5.0"})
+            r.raise_for_status()
+            
+            html_bytes = r.content
+            try:
+                import chardet
+                detected = chardet.detect(html_bytes)
+                encoding = detected.get('encoding', 'utf-8')
+                if detected.get('confidence', 0) < 0.7:
+                    encoding = r.encoding or 'utf-8'
+                html = html_bytes.decode(encoding, errors='replace')
+            except ImportError:
+                html = html_bytes.decode(r.encoding or 'utf-8', errors='replace')
+            
+            extracted_text = extract_text(html)
+    except Exception as e:
+        logger.exception("HTML fetch failed: %s", e)
+    
+    # 4) Build VisualFeatures (simplified)
+    text_lower = extracted_text.lower()
+    vf = {
+        "hero_headline": None,
+        "subheadline": None,
+        "primary_cta_text": "Get Started" if "get started" in text_lower else None,
+        "primary_cta_position": "hero_or_top" if "get started" in text_lower else None,
+        "has_pricing": "pricing" in text_lower or "$" in extracted_text,
+        "has_testimonials": '"' in extracted_text or "testimonial" in text_lower,
+        "has_logos": "fortune 500" in text_lower or "trusted by" in text_lower,
+        "has_guarantee": "guarantee" in text_lower or "money back" in text_lower,
+    }
+    
+    # 5) Build features dict
+    features = {
+        "visual": vf,
+        "text": {
+            "key_lines": [l for l in extracted_text.splitlines() if l.strip()][:10],
+        },
+        "meta": {
+            "url": url,
+            "timestamp": datetime.utcnow().isoformat(),
+        }
+    }
+    
+    # 6) Prepare DOM data for signal detector
+    dom_ctas = []
+    if dom_data and isinstance(dom_data, dict):
+        page_map_ctas = dom_data.get("ctas", [])
+        for cta in page_map_ctas:
+            if isinstance(cta, dict):
+                dom_ctas.append({
+                    "text": cta.get("text") or cta.get("label", ""),
+                    "href": cta.get("href", ""),
+                    "location": cta.get("location", "unknown"),
+                    "kind": cta.get("kind", "unknown"),
+                    "bucket": cta.get("bucket", "secondary")
+                })
+    
+    dom_for_signals = {
+        "ctas": dom_ctas,
+        "has_contact": "contact" in text_lower or "@" in extracted_text,
+        "hero_headline": dom_data.get("hero_headline") if dom_data else None,
+        "subheadline": dom_data.get("subheadline") if dom_data else None,
+    }
+    
+    # 7) Build Phase 1: Signal report
+    try:
+        signal_report = build_signal_report_v1(
+            url=url,
+            input_type="url",
+            features=features,
+            visual=visual or {},
+            dom=dom_for_signals
+        )
+    except Exception as e:
+        logger.exception("Signal report build failed: %s", e)
+        error_detail = str(e)
+        error_type = type(e).__name__
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": True,
+                "error_type": error_type,
+                "error_message": error_detail,
+                "url": url,
+                "debug": {
+                    "capture_available": capture is not None,
+                    "dom_data_available": dom_data is not None,
+                    "visual_available": visual is not None,
+                    "features_available": bool(features),
+                }
+            },
+            media_type="application/json; charset=utf-8"
+        )
+    
+    # 8) Build Phase 2: Decision logic
+    try:
+        decision_logic = build_decision_logic_v1(signal_report)
+        
+        # Return JSONResponse with explicit UTF-8 charset
+        return JSONResponse(
+            content=decision_logic.dict(),
+            media_type="application/json; charset=utf-8"
+        )
+    except Exception as e:
+        logger.exception("Decision logic build failed: %s", e)
+        error_detail = str(e)
+        error_type = type(e).__name__
+        return JSONResponse(
+            status_code=500,
+            content={
+                "error": True,
+                "error_type": error_type,
+                "error_message": error_detail,
+                "url": url,
+                "debug": {
+                    "signal_report_available": signal_report is not None,
+                }
+            },
+            media_type="application/json; charset=utf-8"
+        )

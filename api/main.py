@@ -37,11 +37,13 @@ from fastapi import APIRouter, FastAPI, HTTPException, UploadFile, File, Form, R
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 import os
 import sys
 import base64
 import json
+from json import JSONDecodeError
 import logging
 import io
 from pathlib import Path
@@ -89,6 +91,7 @@ from .routes.image_trust_local import router as image_trust_local_router
 from .routes.image_trust import router as image_trust_router
 from .routes.training_landing_friction import router as landing_friction_training_router
 from .routes.analyze_url import router as analyze_url_router
+from .routes.analyze_url_human import router as analyze_url_human_router
 from .routes.debug_screenshot import router as debug_screenshot_router
 from .routes.debug import router as debug_router
 from .routes.brain_features import router as brain_features_router
@@ -152,8 +155,12 @@ def load_psychology_finetune_model_id() -> str:
         )
     return model_id
 
-# Initialize FastAPI app
-app = FastAPI(title="Nima AI Brain API", version="1.0.0")
+# Initialize FastAPI app with UTF-8 JSONResponse as default
+app = FastAPI(
+    title="Nima AI Brain API",
+    version="1.0.0",
+    default_response_class=JSONResponse
+)
 
 # Startup event: Log environment configuration
 @app.on_event("startup")
@@ -227,6 +234,56 @@ else:
         allow_headers=["*"],
     )
 
+# Mount static files directory for serving screenshots
+# Screenshots will be accessible at /static/shots/shot_YYYYMMDD_HHMMSS.png
+static_dir = project_root / "api" / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+    print(f"✅ Static files mounted at /static (directory: {static_dir})")
+else:
+    # Create directory if it doesn't exist
+    static_dir.mkdir(parents=True, exist_ok=True)
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+    print(f"✅ Static files directory created and mounted at /static (directory: {static_dir})")
+
+# Mount debug shots directory for timestamped screenshots
+# Screenshots will be accessible at /api/debug_shots/desktop_YYYYMMDD_HHMMSS.png
+debug_shots_dir_env = os.getenv("SCREENSHOT_DEBUG_DIR", "api/debug_shots")
+debug_shots_dir = project_root / debug_shots_dir_env
+if debug_shots_dir.exists():
+    app.mount(f"/{debug_shots_dir_env}", StaticFiles(directory=str(debug_shots_dir)), name="debug_shots")
+    print(f"✅ Debug shots mounted at /{debug_shots_dir_env} (directory: {debug_shots_dir})")
+else:
+    # Create directory if it doesn't exist
+    debug_shots_dir.mkdir(parents=True, exist_ok=True)
+    app.mount(f"/{debug_shots_dir_env}", StaticFiles(directory=str(debug_shots_dir)), name="debug_shots")
+    print(f"✅ Debug shots directory created and mounted at /{debug_shots_dir_env} (directory: {debug_shots_dir})")
+
+# Exception handler for JSON decode errors (400)
+@app.exception_handler(JSONDecodeError)
+async def json_decode_exception_handler(request: Request, exc: JSONDecodeError):
+    """
+    Handle JSON decode errors with user-friendly messages.
+    This catches malformed JSON in request bodies.
+    """
+    import logging
+    logger = logging.getLogger("brain")
+    
+    logger.warning(f"JSON decode error: {exc}")
+    print(f"\n❌ JSON DECODE ERROR (400): {exc}")
+    print(f"Request path: {request.url.path}")
+    print(f"Request method: {request.method}")
+    
+    return JSONResponse(
+        status_code=400,
+        content={
+            "error_type": "INVALID_JSON",
+            "message": "بدنه‌ی درخواست JSON قابل پردازش نیست. لطفاً فرمت JSON را بررسی کنید.",
+            "detail": str(exc),
+            "path": request.url.path
+        }
+    )
+
 # Exception handler for validation errors (422)
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -279,11 +336,11 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     print(f"Error details: {error_details}")
     
     return JSONResponse(
-        status_code=422,
+        status_code=400,
         content={
-            "detail": error_details,
-            "message": user_message,
-            "error_type": "validation_error",
+            "error_type": "INVALID_JSON",
+            "message": "فرمت JSON ارسالی صحیح نیست. لطفاً درخواست را با بدنه‌ی معتبر ارسال کنید.",
+            "details": error_details,
             "path": request.url.path
         }
     )
@@ -391,6 +448,7 @@ app.include_router(image_trust_router, prefix="/api/analyze/image-trust", tags=[
 app.include_router(image_trust_local_router)
 app.include_router(landing_friction_training_router)
 app.include_router(analyze_url_router)
+app.include_router(analyze_url_human_router)
 app.include_router(debug_screenshot_router)
 app.include_router(debug_router)
 app.include_router(brain_features_router)
@@ -1224,7 +1282,12 @@ def debug_env():
     if not is_local_dev():
         raise HTTPException(status_code=404, detail="Not found")
     
-    return get_debug_env_info()
+    # Return simple env info
+    return {
+        "openai_key": "SET" if os.getenv("OPENAI_API_KEY") else "MISSING",
+        "openai_model": os.getenv("OPENAI_MODEL", "gpt-4o-mini"),
+        "openai_key_preview": os.getenv("OPENAI_API_KEY", "")[:10] + "..." if os.getenv("OPENAI_API_KEY") else "MISSING",
+    }
 
 
 @app.get("/api/packages")

@@ -1,0 +1,5 @@
+﻿{
+    "timeoutSec":  45,
+    "url":  "https://example.com",
+    "refresh":  true
+}

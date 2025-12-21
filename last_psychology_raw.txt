@@ -1,0 +1,83 @@
+{
+  "personality_activation": {
+    "openness": 10,
+    "conscientiousness": 10,
+    "extraversion": 10,
+    "agreeableness": 10,
+    "neuroticism": 10,
+    "label": "Minimal Activation",
+    "summary": "The copy 'test' provides minimal cues to activate any specific personality traits, resulting in very low engagement across all Big Five dimensions."
+  },
+  "cognitive_style": {
+    "style": "undefined",
+    "overload_risk": 5,
+    "ambiguity_aversion": 90,
+    "description": "The extremely minimal and ambiguous content creates high ambiguity aversion and confusion, with very little cognitive style engagement."
+  },
+  "emotional_response": {
+    "trust": 5,
+    "curiosity": 10,
+    "motivation": 5,
+    "confusion": 90,
+    "anxiety": 20,
+    "narrative": "The copy triggers high confusion and low trust and motivation, with slight curiosity due to lack of information."
+  },
+  "decision_frame": {
+    "mode": "gain_seeking",
+    "risk_style": "high",
+    "tendency": "hesitate",
+    "description": "Visitors are likely to hesitate due to lack of information and clarity, perceiving higher risk in proceeding."
+  },
+  "trust_dynamics": {
+    "visual": 0,
+    "authority": 0,
+    "social_proof": 0,
+    "skepticism": 95,
+    "narrative": "No trust elements are present, leading to very high skepticism."
+  },
+  "motivation_style": {
+    "primary": "none",
+    "secondary": null,
+    "description": "No motivational drivers are activated by the copy."
+  },
+  "cognitive_load": {
+    "clarity": 0,
+    "overload": 10,
+    "ambiguity": 95,
+    "narrative": "The copy is extremely unclear and ambiguous, causing cognitive overload due to lack of meaningful content."
+  },
+  "behavioral_prediction": {
+    "convert": 0,
+    "hesitate": 90,
+    "bounce": 90,
+    "postpone": 10,
+    "narrative": "Visitors are highly likely to hesitate or bounce immediately due to the lack of compelling content."
+  },
+  "attention_map": {
+    "hotspots": [],
+    "friction_points": ["entire copy"],
+    "narrative": "No attention hotspots exist; the entire copy acts as a friction point."
+  },
+  "emotional_triggers": {
+    "activated": [],
+    "missing": ["trust", "curiosity", "motivation", "security", "urgency"],
+    "narrative": "All key emotional triggers are missing, resulting in low engagement."
+  },
+  "memory_activation": {
+    "semantic": 0,
+    "emotional": 0,
+    "pattern": 0,
+    "narrative": "No semantic or emotional memory cues are present."
+  },
+  "risk_perception": {
+    "score": 90,
+    "drivers": ["ambiguity", "lack of information", "no trust signals"],
+    "narrative": "High perceived risk due to ambiguous and minimal content without trust or authority signals."
+  },
+  "cta_match": {
+    "fit_score": 0,
+    "clarity": 0,
+    "motivation_alignment": 0,
+    "narrative": "No call to action or motivational alignment is present."
+  }
+}

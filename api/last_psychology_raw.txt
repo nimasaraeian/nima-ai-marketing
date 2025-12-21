@@ -1,0 +1,98 @@
+{
+  "analysis": {
+    "cognitive_friction": {
+      "score": 45,
+      "signals": [
+        "Vague statement: 'simple landing page'",
+        "No clear explanation of features",
+        "Generic pricing without context"
+      ],
+      "hotspots": [
+        "This is a simple landing page",
+        "Pricing: $29/mo"
+      ],
+      "reasons": "The content is straightforward but lacks depth, creating a moderate level of ambiguity.",
+      "rewrite": "Experience a user-friendly platform for just $29/month with flexible cancellation and a 14-day money-back guarantee."
+    },
+    "emotional_resonance": {
+      "score": 50,
+      "emotion_detected": "Neutral",
+      "emotion_required": "Trust + Confidence",
+      "mismatch": "The message lacks emotional engagement and excitement.",
+      "reasons": "While it provides essential information, it does not evoke a strong emotional response.",
+      "rewrite": "Join over 1200 satisfied users who trust our platform to enhance their experience."
+    },
+    "trust_clarity": {
+      "score": 60,
+      "issues": [
+        "No detailed proof of user satisfaction",
+        "Lacks specific benefits of the platform",
+        "Security claim is vague"
+      ],
+      "missing_proof": ["User testimonials", "Specific security details"],
+      "ambiguities": ["simple landing page", "SOC2"],
+      "reasons": "The presence of a money-back guarantee and user count helps, but more specific proof would enhance trust.",
+      "rewrite": "With a 14-day money-back guarantee and SOC2 compliance, your data is secure with us."
+    },
+    "decision_simplicity": {
+      "score": 70,
+      "complexity_signals": [],
+      "cta_analysis": "CTA is clear but could be more compelling.",
+      "path_problems": ["User may not know what to expect after clicking"],
+      "rewrite": "Start your free trial today and explore our platform risk-free."
+    },
+    "motivation_profile": {
+      "score": 65,
+      "dominant": "Competence",
+      "alignment": "Good",
+      "misalignment_signals": [],
+      "rewrite": "Take control of your experience with our intuitive platform designed for ease of use."
+    },
+    "behavioral_biases": {
+      "score": 55,
+      "bias_detected": ["Social proof"],
+      "bias_risk": ["Low"],
+      "bias_missing": ["Authority", "Specificity"],
+      "bias_recommendation": ["Add specific user testimonials or case studies"]
+    },
+    "personality_fit": {
+      "score": 60,
+      "fit_level": "Medium",
+      "misalignment": "Could appeal more to analytical users with specific details.",
+      "personality_target": "General audience",
+      "alternatives": ["Provide more detailed feature explanations"]
+    },
+    "value_perception": {
+      "score": 55,
+      "value_ladder": [
+        "Feature: simple landing page",
+        "Benefit: easy to use",
+        "Emotional value: confidence",
+        "Identity value: being a savvy user"
+      ],
+      "missing_values": ["Time savings", "Specific outcomes"],
+      "reasons": "Value is implied but not explicitly stated, which could lead to lower perceived worth.",
+      "rewrite": "Save time and effort with our straightforward platform that simplifies your workflow."
+    },
+    "attention_architecture": {
+      "score": 50,
+      "hook_quality": "Weak",
+      "dead_zones": ["This is a simple landing page"],
+      "pace_analysis": "Flat and lacks engagement",
+      "rewrite": "Discover how our platform can streamline your processes effortlessly."
+    },
+    "narrative_clarity": {
+      "score": 55,
+      "sequence_map": {
+        "hook": "Weak",
+        "conflict": "None",
+        "value": "Vague",
+        "proof": "Missing",
+        "cta": "Present"
+      },
+      "missing_parts": ["Conflict", "Proof", "Clear value"],
+      "rewrite": "Experience a platform that simplifies your tasks and enhances productivity."
+    },
+    "emotional_safety": {
+      "score": 80,
+      "danger_terms

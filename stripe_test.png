@@ -1,0 +1,1 @@
+{"detail":[{"field":"body -> 7","message":"JSON decode error","type":"json_invalid","original_message":"JSON decode error"}],"message":"JSON decode error","error_type":"validation_error","path":"/debug/screenshot"}

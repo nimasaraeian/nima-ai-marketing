@@ -1,0 +1,13 @@
+﻿{
+    "visualTrust":  {
+                        "label":  "Medium",
+                        "status":  "ok",
+                        "overall_score":  60,
+                        "narrative":  [
+                                          "CTA not detected; ensure a clear primary action.",
+                                          "No obvious social proof detected.",
+                                          "Prominent headline region detected."
+                                      ]
+                    },
+    "url":  "https://example.com"
+}

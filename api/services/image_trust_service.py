@@ -52,10 +52,37 @@ def _sanitize_analysis(a: dict | None) -> dict:
     return out
 
 
+def normalize_visual_role(role: str | None) -> str:
+    """
+    Normalize visual role to allowed values.
+    Maps common aliases to valid roles and filters invalid ones.
+    """
+    r = (role or "").strip().lower()
+    
+    # Common aliases
+    if r in ("cta", "call_to_action"):
+        return "primary_cta"
+    if r in ("secondary_cta", "cta_secondary"):
+        return "secondary_cta"
+    
+    if r in ("logos", "logo_strip", "social_proof", "brand_logos"):
+        # These are more trust signals than single "logo"
+        return "trust_badge"
+    
+    if r in ("risk_reduction", "risk", "guarantee", "refund", "secure_payment", "payment_form"):
+        return "trust_badge"  # or "other" if preferred
+    
+    # Passthrough if already valid-ish
+    allowed = {
+        "logo", "headline", "subheadline", "primary_cta", "secondary_cta",
+        "benefit_card", "testimonial", "trust_badge", "pricing_block", "hero_image", "other"
+    }
+    return r if r in allowed else "other"
+
+
 def _sanitize_role(role: str | None) -> str:
-    # اگر مدل roleها رو سخت‌گیرانه گرفته، اینجا امنش می‌کنیم
-    r = (role or "other").strip()
-    return r
+    # Legacy function - now uses normalize_visual_role
+    return normalize_visual_role(role)
 
 
 def _build_local_visual_result(
@@ -74,10 +101,25 @@ def _build_local_visual_result(
     elements: List[VisualElement] = []
     for e in elements_raw:
         try:
+            raw_role = e.get("role")
+            role = normalize_visual_role(raw_role)
+            
+            # Log normalization if changed
+            if raw_role and raw_role.strip().lower() != role:
+                logger.info(
+                    "Visual role normalized: '%s' -> '%s' (id=%s)",
+                    raw_role,
+                    role,
+                    e.get("id", f"element_{len(elements)}")
+                )
+            
+            # Update raw dict for debug (optional)
+            e["role"] = role
+            
             elements.append(
                 VisualElement(
                     id=str(e.get("id") or f"element_{len(elements)}"),
-                    role=_sanitize_role(e.get("role")),
+                    role=role,
                     approx_position=str(e.get("approx_position") or "middle-center"),
                     text=e.get("text"),
                     visual_cues=[str(x) for x in (e.get("visual_cues") or [])],
@@ -196,10 +238,22 @@ def _run_openai_fallback(file_bytes: bytes, content_type: str) -> VisualTrustRes
     elements: List[VisualElement] = []
     for e in raw_elements:
         try:
+            raw_role = e.get("role", "other")
+            role = normalize_visual_role(raw_role)
+            
+            # Log normalization if changed
+            if raw_role and raw_role.strip().lower() != role:
+                logger.info(
+                    "Visual role normalized: '%s' -> '%s' (id=%s)",
+                    raw_role,
+                    role,
+                    e.get("id", f"element_{len(elements)}")
+                )
+            
             elements.append(
                 VisualElement(
                     id=e.get("id", f"element_{len(elements)}"),
-                    role=e.get("role", "other"),
+                    role=role,
                     approx_position=e.get("approx_position", "middle-center"),
                     text=e.get("text"),
                     visual_cues=e.get("visual_cues") or [],

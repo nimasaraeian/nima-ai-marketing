@@ -1,0 +1,5 @@
+﻿{
+    "timeoutSec":  60,
+    "url":  "https://stripe.com",
+    "refresh":  true
+}

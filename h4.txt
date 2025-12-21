@@ -1,0 +1,6 @@
+HTTP/1.1 200 OK
+date: Sun, 14 Dec 2025 23:15:02 GMT
+server: uvicorn
+content-length: 10966
+content-type: image/png
+

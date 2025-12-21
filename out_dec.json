@@ -1,0 +1,1 @@
+{"detail":[{"field":"body -> content","message":"Required field 'body -> content' is missing","type":"missing","original_message":"Field required"}],"message":"Required field 'body -> content' is missing","error_type":"validation_error","path":"/api/brain/decision-engine/report"}

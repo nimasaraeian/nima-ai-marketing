@@ -13,10 +13,14 @@ openai>=1.0.0
 # HTTP requests (for testing and external APIs)
 requests>=2.31.0
 beautifulsoup4>=4.12.0
+lxml>=4.9.0
 
-# Image processing (PIL)
+# Browser automation
+playwright>=1.40.0
+
+# Image processing / CV (no TensorFlow required)
 Pillow>=10.0.0
-numpy==1.23.5
-# TensorFlow 2.15 includes the newer keras.src modules that are required
-# to deserialize .keras models exported from Keras 3.x.
-tensorflow-cpu==2.15.0
+numpy>=1.24.0
+opencv-python>=4.8.0
+# Optional OCR (disabled by default)
+# pytesseract>=0.3.10
