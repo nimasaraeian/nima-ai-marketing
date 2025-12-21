@@ -262,8 +262,18 @@ async def analyze_url_human(
         
         # Keep legacy report for backward compatibility
         signal_report_result = generate_human_report_from_v1(signal_report_v1)
-        human_report = signal_report_result.get("human_report", "")
-        report_meta = signal_report_result.get("report_meta", {})
+        human_report = signal_report_result.get("human_report", "") or ""
+        report_meta = signal_report_result.get("report_meta", {}) or {}
+        
+        # Ensure human_report is always a non-empty string (fallback to humanReportV1 summary)
+        if not human_report or len(human_report.strip()) == 0:
+            # Fallback: generate a simple summary from humanReportV1
+            human_report = f"## Verdict\n\n{human_report_v1.verdict}\n\n## Top Blockers\n\n"
+            for blocker in human_report_v1.top_blockers[:3]:
+                human_report += f"- **{blocker.get('id', 'Unknown').replace('_', ' ').title()}** - {blocker.get('severity', 'unknown')} severity\n"
+            human_report += f"\n## Quick Wins\n\n"
+            for i, win in enumerate(human_report_v1.quick_wins[:3], 1):
+                human_report += f"{i}. {win.title}\n"
         
         # Keep legacy signals for backward compatibility (optional)
         signals_result = await detect_signals(capture, page_map, goal=payload.goal, locale=payload.locale)
@@ -466,9 +476,8 @@ async def analyze_url_human(
             "signalReportV1": signal_report_v1_dict,  # Phase 1 signals (primary source)
             "decisionLogicV1": decision_logic.dict(),  # Phase 2 decision logic (new)
             "humanReportV1": human_report_v1.dict(),  # Phase 3 human report (new, structured)
-            # Legacy fields removed - use humanReportV1 instead
-            # "human_report": human_report,  # Removed - use humanReportV1 instead
-            # "reportMeta": report_meta  # Removed - use humanReportV1.quick_wins instead
+            "human_report": human_report,  # Legacy field for backward compatibility (markdown string)
+            "reportMeta": report_meta  # Legacy field for backward compatibility
         }
         
         # Optional: Add decisionSummary separately (not decisionSignalsSummary)
