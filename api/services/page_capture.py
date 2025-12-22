@@ -17,13 +17,10 @@ logger = logging.getLogger(__name__)
 # Note: Event loop policy should be set in main.py before FastAPI starts
 # We can't change it here as the loop is already running
 
-# Get project root (parent of api directory)
-_project_root = Path(__file__).parent.parent.parent
-_artifact_dir_env = os.getenv("ARTIFACT_DIR")
-if _artifact_dir_env:
-    ARTIFACT_DIR = os.path.abspath(_artifact_dir_env)
-else:
-    ARTIFACT_DIR = str(_project_root / "api" / "artifacts")
+# Use the same ARTIFACTS_DIR as defined in api/main.py
+# This ensures screenshots are saved to the same directory that is mounted as StaticFiles
+from api.core.config import get_artifacts_dir
+ARTIFACT_DIR = str(get_artifacts_dir())
 
 
 def _utc_now():
