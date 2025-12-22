@@ -1418,6 +1418,42 @@ def version():
     }
 
 
+@app.get("/api/_debug/artifacts/list")
+def list_artifacts():
+    """Debug endpoint to list all files in artifacts directory."""
+    if not ARTIFACTS_DIR.exists():
+        return {
+            "error": "Directory does not exist",
+            "path": str(ARTIFACTS_DIR)
+        }
+    
+    try:
+        files = []
+        for f in ARTIFACTS_DIR.glob("*.png"):
+            if f.is_file():
+                stat = f.stat()
+                files.append({
+                    "name": f.name,
+                    "size": stat.st_size,
+                    "modified": stat.st_mtime
+                })
+        
+        # Sort by modified time (newest first)
+        files.sort(key=lambda x: x["modified"], reverse=True)
+        
+        return {
+            "path": str(ARTIFACTS_DIR),
+            "exists": True,
+            "file_count": len(files),
+            "files": files[:20]  # Return top 20 files
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "path": str(ARTIFACTS_DIR)
+        }
+
+
 @app.get("/debug/env")
 def debug_env():
     """
