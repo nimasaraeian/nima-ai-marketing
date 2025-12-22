@@ -7,7 +7,7 @@ to generate professional decision analysis reports.
 
 import json
 from decision_engine import DecisionEngineInput, analyze_decision_failure
-from utils.client_report_formatter import format_decision_report
+from api.utils.client_report_formatter import format_decision_report
 
 
 def example_basic_usage():

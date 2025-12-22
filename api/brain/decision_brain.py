@@ -7,7 +7,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List
 
-from ..schemas.page_features import PageFeatures
+from api.schemas.page_features import PageFeatures
 
 
 @dataclass

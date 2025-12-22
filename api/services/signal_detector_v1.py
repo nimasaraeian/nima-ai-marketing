@@ -1,6 +1,6 @@
 import re
 from typing import Any, Dict, List, Optional
-from ..schemas.signal_v1 import SignalReportV1, CTAItem, EvidenceItem
+from api.schemas.signal_v1 import SignalReportV1, CTAItem, EvidenceItem
 
 
 ACTION_VERBS = re.compile(r"\b(get|start|try|book|request|download|see|view|join|sign up|subscribe|contact)\b", re.I)

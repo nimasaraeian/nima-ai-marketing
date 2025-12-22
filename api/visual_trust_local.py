@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from .services.image_trust_service import analyze_image_trust_bytes
+from api.services.image_trust_service import analyze_image_trust_bytes
 
 
 def analyze_visual_trust_local(image_bytes: bytes) -> Dict[str, Any]:

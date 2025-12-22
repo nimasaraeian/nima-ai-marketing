@@ -17,10 +17,10 @@ if sys.platform.startswith("win"):
     except:
         pass  # Already set or not needed
 
-from ..services.page_capture import capture_page_artifacts
-from ..services.page_extract import extract_page_map
-from ..services.brain_rules import run_heuristics
-from ..services.human_report import render_human_report
+from api.services.page_capture import capture_page_artifacts
+from api.services.page_extract import extract_page_map
+from api.services.brain_rules import run_heuristics
+from api.services.human_report import render_human_report
 
 router = APIRouter()
 

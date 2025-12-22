@@ -17,7 +17,7 @@ from typing import Optional, Dict
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 import requests
-from .text_utils import fix_mojibake
+from api.utils.text_utils import fix_mojibake
 
 # Import Playwright-based URL renderer (ASYNC ONLY)
 try:

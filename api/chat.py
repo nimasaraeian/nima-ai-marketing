@@ -5,7 +5,7 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from openai import OpenAI
-from .brain_loader import load_brain_memory
+from api.brain_loader import load_brain_memory
 
 # Load .env file
 project_root = Path(__file__).parent.parent

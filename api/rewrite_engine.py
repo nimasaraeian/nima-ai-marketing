@@ -17,7 +17,7 @@ from pathlib import Path
 from openai import OpenAI
 
 # Import models - using relative import (no sys.path manipulation needed)
-from .models.rewrite_models import RewriteInput, RewriteOutput
+from api.models.rewrite_models import RewriteInput, RewriteOutput
 
 # Load environment variables
 project_root = Path(__file__).parent.parent

@@ -44,7 +44,7 @@ except ImportError:
 
 # Import decision stage inference
 try:
-    from utils.decision_stage_inference import (
+    from api.utils.decision_stage_inference import (
         decision_stage_inference,
         DecisionStage,
         FrictionSeverity
@@ -881,7 +881,7 @@ async def analyze_decision_failure(input_data: DecisionEngineInput) -> DecisionE
     
     if url_to_extract:
         try:
-            from utils.decision_snapshot_extractor import extract_decision_snapshot, format_snapshot_text, detect_channel
+            from api.utils.decision_snapshot_extractor import extract_decision_snapshot, format_snapshot_text, detect_channel
             snapshot = await extract_decision_snapshot(url_to_extract)  # AWAIT async call
             user_message = format_snapshot_text(snapshot)
             
@@ -925,7 +925,7 @@ async def analyze_decision_failure(input_data: DecisionEngineInput) -> DecisionE
     # If URL provided but no snapshot extracted, detect channel from URL
     if not snapshot and (input_data.url or url_to_extract):
         try:
-            from utils.decision_snapshot_extractor import detect_channel
+            from api.utils.decision_snapshot_extractor import detect_channel
             url_for_channel = url_to_extract or input_data.url
             if url_for_channel:
                 channel = detect_channel(url_for_channel)
@@ -1515,7 +1515,7 @@ async def decision_engine_endpoint(input_data: DecisionEngineInput):
                 context_data["platform"] = platform
             
             try:
-                from utils.decision_snapshot_extractor import extract_decision_snapshot
+                from api.utils.decision_snapshot_extractor import extract_decision_snapshot
                 snapshot = await extract_decision_snapshot(url_to_extract)  # AWAIT async call
                 
                 # Extract additional context from snapshot if available
@@ -1611,7 +1611,7 @@ async def decision_engine_report_endpoint(
     as a professional diagnostic report suitable for direct client delivery.
     """
     try:
-        from utils.client_report_formatter import format_decision_report
+        from api.utils.client_report_formatter import format_decision_report
         
         # Get decision analysis
         result = await analyze_decision_failure(input_data)  # AWAIT async call
@@ -1632,7 +1632,7 @@ async def decision_engine_report_endpoint(
                 context_data["platform"] = platform
             
             try:
-                from utils.decision_snapshot_extractor import extract_decision_snapshot
+                from api.utils.decision_snapshot_extractor import extract_decision_snapshot
                 snapshot = await extract_decision_snapshot(url_to_extract)  # AWAIT async call
                 
                 # Extract additional context from snapshot if available
@@ -1850,7 +1850,7 @@ async def decision_engine_report_from_url(payload: ReportFromUrlInput):
     
     # Step 3: Capture screenshot (using internal function, not HTTP)
     try:
-        from .services.screenshot import capture_url_png_bytes
+        from api.services.screenshot import capture_url_png_bytes
         screenshot_bytes = await asyncio.to_thread(capture_url_png_bytes, url)
     except Exception as e:
         logger.exception(f"Failed to capture screenshot: {e}")
@@ -1862,7 +1862,7 @@ async def decision_engine_report_from_url(payload: ReportFromUrlInput):
     
     # Step 4: Run visual trust analysis (using internal function, not HTTP)
     try:
-        from .visual_trust_engine import run_visual_trust_from_bytes
+        from api.visual_trust_engine import run_visual_trust_from_bytes
         visual_trust_result = run_visual_trust_from_bytes(screenshot_bytes)
     except Exception as e:
         logger.exception(f"Failed to analyze visual trust: {e}")
@@ -1891,7 +1891,7 @@ async def decision_engine_report_from_url(payload: ReportFromUrlInput):
         
         # Format report (similar to report endpoint)
         try:
-            from utils.client_report_formatter import format_decision_report
+            from api.utils.client_report_formatter import format_decision_report
             context_data = {
                 "url": url,
                 "platform": platform,

@@ -18,21 +18,21 @@ try:
 except Exception:
     Document = None  # type: ignore
 
-from ..schemas.page_features import (
+from api.schemas.page_features import (
     PageFeatures,
     VisualFeatures,
     TextFeatures,
     MetaFeatures,
     FEATURES_SCHEMA_VERSION,
 )
-from ..brain.decision_brain import analyze_decision
-from ..visual_trust_engine import run_visual_trust_from_bytes
-from ..services.screenshot import capture_url_png_bytes
-from ..utils.text_sanitize import sanitize_any
-from ..services.signal_detector_v1 import build_signal_report_v1
-from ..services.decision_logic_v1 import build_decision_logic_v1
-from ..services.page_capture import capture_page_artifacts
-from ..services.page_extract import extract_page_map
+from api.brain.decision_brain import analyze_decision
+from api.visual_trust_engine import run_visual_trust_from_bytes
+from api.services.screenshot import capture_url_png_bytes
+from api.utils.text_sanitize import sanitize_any
+from api.services.signal_detector_v1 import build_signal_report_v1
+from api.services.decision_logic_v1 import build_decision_logic_v1
+from api.services.page_capture import capture_page_artifacts
+from api.services.page_extract import extract_page_map
 import asyncio
 
 # Playwright timeout compatibility

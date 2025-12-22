@@ -6,8 +6,8 @@ import logging
 import os
 from typing import Any, Dict, List, Literal, Optional
 
-from ..vision.local_visual_extractor import extract_visual_elements
-from ..cognitive_friction_engine import (
+from api.vision.local_visual_extractor import extract_visual_elements
+from api.cognitive_friction_engine import (
     VisualElement,
     VisualTrustResult,
     VISUAL_TRUST_SYSTEM_PROMPT,

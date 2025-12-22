@@ -3,7 +3,7 @@ Human Report Generator from SignalReportV1 (Phase 1 signals)
 Generates markdown report from SignalReportV1 (English, no scores).
 """
 from typing import Dict, Any, List
-from ..schemas.signal_v1 import SignalReportV1
+from api.schemas.signal_v1 import SignalReportV1
 
 
 def generate_human_report_from_v1(signal_report: SignalReportV1) -> Dict[str, Any]:

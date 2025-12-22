@@ -21,10 +21,10 @@ from typing import Any, Dict, Literal, Optional, List
 from fastapi import APIRouter, File, HTTPException, UploadFile, Query
 
 # Use OpenCV + local extractor (no TensorFlow dependency)
-from ..services.image_trust_service import analyze_image_trust_bytes
+from api.services.image_trust_service import analyze_image_trust_bytes
 
 # Optional: OpenAI Vision endpoint (kept, but isolated)
-from ..cognitive_friction_engine import (
+from api.cognitive_friction_engine import (
     VisualTrustResult,
     VisualElement,
     VISUAL_TRUST_SYSTEM_PROMPT,

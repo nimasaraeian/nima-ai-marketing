@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict
 from dotenv import load_dotenv
 
-from ..schemas.page_features import VisualFeatures
+from api.schemas.page_features import VisualFeatures
 
 # Try to find .env file in project root
 project_root = Path(__file__).parent.parent.parent

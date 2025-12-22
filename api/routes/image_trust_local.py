@@ -1,6 +1,6 @@
 from fastapi import APIRouter, UploadFile, File
 
-from ..services.image_trust_service import analyze_image_trust_bytes
+from api.services.image_trust_service import analyze_image_trust_bytes
 
 router = APIRouter(prefix="/api/analyze", tags=["image-trust-local"])
 

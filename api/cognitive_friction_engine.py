@@ -23,8 +23,8 @@ from dotenv import load_dotenv
 from pathlib import Path
 from openai import OpenAI
 
-from .models.psychology_dashboard import PsychologyDashboard
-from .psychology_engine import PsychologyAnalysisResult
+from api.models.psychology_dashboard import PsychologyDashboard
+from api.psychology_engine import PsychologyAnalysisResult
 
 # Load environment variables
 project_root = Path(__file__).parent.parent

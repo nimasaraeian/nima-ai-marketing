@@ -33,7 +33,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 from openai import OpenAI
 
-from .json_utils import safe_parse_json
+from api.json_utils import safe_parse_json
 
 # Load environment variables
 project_root = Path(__file__).parent.parent

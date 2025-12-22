@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple, Literal
 from PIL import Image
 
-from ..chat import get_client
+from api.chat import get_client
 
 # Element types supported
 ElementType = Literal["cta", "headline", "pricing", "testimonial", "badge", "logo", "nav", "form", "input"]

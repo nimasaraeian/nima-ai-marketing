@@ -9,7 +9,7 @@ from __future__ import annotations
 import os
 from typing import Any, Dict
 
-from ..services.image_trust_service import analyze_image_trust_bytes
+from api.services.image_trust_service import analyze_image_trust_bytes
 
 
 def _normalize(result: Dict[str, Any], error: str | None = None) -> Dict[str, Any]:

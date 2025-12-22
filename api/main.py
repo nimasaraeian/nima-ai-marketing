@@ -64,9 +64,9 @@ if os.name == "nt":
         # If reconfigure isn't supported, fall back silently without crashing startup
         pass
 
-from .brain_loader import load_brain_memory
-from .chat import chat_completion, chat_completion_with_image
-from .cognitive_friction_engine import (
+from api.brain_loader import load_brain_memory
+from api.chat import chat_completion, chat_completion_with_image
+from api.cognitive_friction_engine import (
     analyze_cognitive_friction,
     CognitiveFrictionInput,
     CognitiveFrictionResult,
@@ -74,26 +74,26 @@ from .cognitive_friction_engine import (
     # VisualTrustAnalysis,  # Temporarily disabled
     # VisualTrustResult,  # Temporarily disabled
 )
-from .psychology_engine import (
+from api.psychology_engine import (
     analyze_psychology,
     analyze_advanced_psychology,
     PsychologyAnalysisInput,
     PsychologyAnalysisResult
 )
-from .rewrite_engine import rewrite_text
-from .models.rewrite_models import RewriteInput, RewriteOutput
-from .decision_engine import router as decision_engine_router
-from .visual_trust_engine import analyze_visual_trust_from_path
+from api.rewrite_engine import rewrite_text
+from api.models.rewrite_models import RewriteInput, RewriteOutput
+from api.decision_engine import router as decision_engine_router
+from api.visual_trust_engine import analyze_visual_trust_from_path
 # TensorFlow removed - no model loading needed
-from .routes.image_trust_local import router as image_trust_local_router
-from .routes.image_trust import router as image_trust_router
-from .routes.training_landing_friction import router as landing_friction_training_router
-from .routes.analyze_url import router as analyze_url_router
-from .routes.analyze_url_human import router as analyze_url_human_router
-from .routes.debug_screenshot import router as debug_screenshot_router
-from .routes.debug import router as debug_router
-from .routes.brain_features import router as brain_features_router
-from .routes.explain import router as explain_router
+from api.routes.image_trust_local import router as image_trust_local_router
+from api.routes.image_trust import router as image_trust_router
+from api.routes.training_landing_friction import router as landing_friction_training_router
+from api.routes.analyze_url import router as analyze_url_router
+from api.routes.analyze_url_human import router as analyze_url_human_router
+from api.routes.debug_screenshot import router as debug_screenshot_router
+from api.routes.debug import router as debug_router
+from api.routes.brain_features import router as brain_features_router
+from api.routes.explain import router as explain_router
 
 # Import pricing packages
 try:
@@ -164,7 +164,7 @@ async def startup_event():
     logger = logging.getLogger("brain")
     
     try:
-        from .core.config import get_main_brain_backend_url, is_local_dev
+        from api.core.config import get_main_brain_backend_url, is_local_dev
         backend_url = get_main_brain_backend_url()
         env_type = "local-dev" if is_local_dev() else "production"
         logger.info(f"Loaded ENV. MAIN_BRAIN_BACKEND_URL={backend_url} (env={env_type})")
@@ -172,7 +172,7 @@ async def startup_event():
     except RuntimeError as e:
         # In local dev, this should never happen (fallback is provided)
         # But if it does, log it and continue - don't crash the server
-        from .core.config import is_local_dev
+        from api.core.config import is_local_dev
         if is_local_dev():
             # This shouldn't happen, but if it does, use fallback
             logger.warning(f"Backend URL config issue (should use fallback): {e}")
@@ -207,7 +207,7 @@ origins = [
 ]
 
 # In local development, allow all localhost origins for flexibility
-from .core.config import is_local_dev
+from api.core.config import is_local_dev
 if is_local_dev():
     # In local dev, allow all origins for easier development
     # This allows any localhost port to connect
@@ -367,7 +367,7 @@ def include_dataset_router(app: FastAPI) -> None:
     """
     logger = logging.getLogger("brain")
     try:
-        from .dataset_upload import router as dataset_router  # local import to catch runtime errors
+        from api.dataset_upload import router as dataset_router  # local import to catch runtime errors
     except RuntimeError as exc:
         warning = (
             "Dataset upload endpoint is disabled because python-multipart is not installed on the server. "
@@ -1221,7 +1221,7 @@ def debug_env():
     
     Returns 404 in production for security.
     """
-    from .core.config import is_local_dev, get_debug_env_info
+    from api.core.config import is_local_dev, get_debug_env_info
     
     if not is_local_dev():
         raise HTTPException(status_code=404, detail="Not found")
@@ -1646,7 +1646,7 @@ async def _cognitive_friction_endpoint_internal(
             if url_to_scrape:
                 print(f"[/api/brain/cognitive-friction] 🔍 Attempting to scrape URL: {url_to_scrape}")
                 try:
-                    from utils.decision_snapshot_extractor import extract_decision_snapshot, format_snapshot_text
+                    from api.utils.decision_snapshot_extractor import extract_decision_snapshot, format_snapshot_text
                     # Add timeout to scraping (45 seconds max)
                     snapshot = await asyncio.wait_for(
                         extract_decision_snapshot(url_to_scrape),

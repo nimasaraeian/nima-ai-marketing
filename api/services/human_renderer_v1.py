@@ -1,7 +1,7 @@
 from typing import List, Dict, Any
-from ..schemas.human_report_v1 import HumanReportV1, HumanQuickWin
-from ..schemas.signal_v1 import SignalReportV1
-from ..schemas.decision_v1 import DecisionLogicV1
+from api.schemas.human_report_v1 import HumanReportV1, HumanQuickWin
+from api.schemas.signal_v1 import SignalReportV1
+from api.schemas.decision_v1 import DecisionLogicV1
 
 
 def render_verdict(decision: DecisionLogicV1) -> str:

@@ -1,7 +1,7 @@
 from fastapi import APIRouter
 
-from ..schemas.page_features import PageFeatures
-from ..brain.decision_brain import analyze_decision
+from api.schemas.page_features import PageFeatures
+from api.brain.decision_brain import analyze_decision
 
 router = APIRouter(prefix="/api/brain", tags=["brain-features"])
 
