@@ -1423,7 +1423,8 @@ def list_artifacts():
     if not ARTIFACTS_DIR.exists():
         return {
             "error": "Directory does not exist",
-            "path": str(ARTIFACTS_DIR)
+            "path": str(ARTIFACTS_DIR),
+            "absolute": str(ARTIFACTS_DIR.resolve())
         }
     
     try:
@@ -1434,8 +1435,19 @@ def list_artifacts():
                 files.append({
                     "name": f.name,
                     "size": stat.st_size,
-                    "modified": stat.st_mtime
+                    "modified": stat.st_mtime,
+                    "exists": True
                 })
+        
+        # Also check if directory is readable
+        return {
+            "path": str(ARTIFACTS_DIR),
+            "absolute": str(ARTIFACTS_DIR.resolve()),
+            "exists": ARTIFACTS_DIR.exists(),
+            "is_dir": ARTIFACTS_DIR.is_dir() if ARTIFACTS_DIR.exists() else False,
+            "files_count": len(files),
+            "files": files
+        }
         
         # Sort by modified time (newest first)
         files.sort(key=lambda x: x["modified"], reverse=True)
