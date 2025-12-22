@@ -36,6 +36,7 @@ if sys.platform.startswith("win"):
 from fastapi import APIRouter, FastAPI, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError
 import os
@@ -155,6 +156,14 @@ def load_psychology_finetune_model_id() -> str:
 
 # Initialize FastAPI app
 app = FastAPI(title="Nima AI Brain API", version="1.0.0")
+
+# Mount static files for debug_shots directory
+BASE_DIR = Path(__file__).resolve().parent  # api/ directory
+DEBUG_SHOTS_DIR = (BASE_DIR / "debug_shots").resolve()
+DEBUG_SHOTS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Mount the debug_shots directory as static files
+app.mount("/api/debug_shots", StaticFiles(directory=str(DEBUG_SHOTS_DIR)), name="debug_shots")
 
 # Startup event: Log environment configuration (non-blocking)
 @app.on_event("startup")
@@ -1274,6 +1283,16 @@ async def get_artifact(filename: str):
         media_type=content_type,
         filename=filename
     )
+
+
+@app.get("/api/debug_shots/_health")
+def debug_shots_health():
+    """Health check endpoint for debug_shots directory."""
+    return {
+        "exists": DEBUG_SHOTS_DIR.exists(),
+        "path": str(DEBUG_SHOTS_DIR),
+        "is_dir": DEBUG_SHOTS_DIR.is_dir() if DEBUG_SHOTS_DIR.exists() else False
+    }
 
 
 @app.get("/debug/env")
