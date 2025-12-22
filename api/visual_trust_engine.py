@@ -70,7 +70,7 @@ def run_visual_trust_from_bytes(image_bytes: bytes) -> dict:
         
         # Run analysis with safe error handling - MUST BE FAIL-SAFE
         try:
-        analysis = analyze_image_trust_bytes(image_bytes)
+            analysis = analyze_image_trust_bytes(image_bytes)
         except Exception as e:
             logger.exception("VisualTrust analysis crashed: %s", e)
             return vt_fallback(f"Visual analysis crashed: {str(e)[:200]}", "VT_FALLBACK_SAFE")
