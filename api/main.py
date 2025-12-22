@@ -211,7 +211,7 @@ async def startup_event():
         quality_enabled = False
     
     print(f"Quality Engine: {'Enabled' if quality_enabled else 'Disabled'}")
-    print("VisualTrust: Using OpenCV + local extractor (no TensorFlow)")
+    print(f"VisualTrust: {'Available' if VISUAL_TRUST_AVAILABLE else 'Not Available'} (Using OpenCV + local extractor)")
     print("=" * 60)
     
     try:
