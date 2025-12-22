@@ -98,11 +98,13 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
     Returns:
         Dictionary with screenshots paths, DOM content, and metadata
     """
-    os.makedirs(ARTIFACT_DIR, exist_ok=True)
+    # Ensure directory exists
+    Path(ARTIFACT_DIR).mkdir(parents=True, exist_ok=True)
     
     ts = int(time.time())
-    atf_path = os.path.join(ARTIFACT_DIR, f"atf_{ts}.png")
-    full_path = os.path.join(ARTIFACT_DIR, f"full_{ts}.png")
+    # Use Path for cross-platform compatibility
+    atf_path = str(Path(ARTIFACT_DIR) / f"atf_{ts}.png")
+    full_path = str(Path(ARTIFACT_DIR) / f"full_{ts}.png")
     
     viewport = {"width": 1440, "height": 900}
     
