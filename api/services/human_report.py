@@ -31,13 +31,23 @@ PROMPT_FA = """تو یک Conversion & Decision UX Auditor هستی.
 خروجی باید شامل: 3 مشکل اصلی + 5 Quick Wins + پیشنهاد متن (Headline/CTA) + چک‌لیست اجرا.
 """
 
+PROMPT_EN = """You are a Conversion & Decision UX Auditor.
 
-async def render_human_report(analysis_json: Dict[str, Any]) -> str:
+Do not use numbers, scores, percentages, confidence, or unnecessary technical jargon.
+
+Only actionable problems. If there is insufficient evidence, honestly say "insufficient evidence".
+
+Output must include: 3 main issues + 5 Quick Wins + suggested copy (Headline/CTA) + implementation checklist.
+"""
+
+
+async def render_human_report(analysis_json: Dict[str, Any], locale: str = "en") -> str:
     """
     Generate human-readable report from analysis JSON.
     
     Args:
         analysis_json: Complete analysis JSON with findings
+        locale: Language locale (fa, en, tr). Default: en (English)
         
     Returns:
         Human-readable report text
@@ -49,14 +59,21 @@ async def render_human_report(analysis_json: Dict[str, Any]) -> str:
     if not OPENAI_API_KEY:
         raise RuntimeError("LLM_UNAVAILABLE")
     
+    # Determine language and prompt
+    is_persian = locale and locale.lower() == "fa"
+    prompt = PROMPT_FA if is_persian else PROMPT_EN
+    language_name = "فارسی" if is_persian else "English"
+    language_instruction = "گزارش را به فارسی بنویس و از اعداد و درصدها استفاده نکن." if is_persian else "Write the report in English and do not use numbers or percentages."
+    error_message = "گزارش تولید نشد." if is_persian else "Report generation failed."
+    
     # Use OpenAI SDK
     try:
         from openai import AsyncOpenAI
         
         client = AsyncOpenAI(api_key=OPENAI_API_KEY)
         
-        user_prompt = f"""زبان: فارسی
-هدف صفحه: {analysis_json.get("input", {}).get("goal")}
+        user_prompt = f"""Language: {language_name}
+Page Goal: {analysis_json.get("input", {}).get("goal")}
 URL: {analysis_json.get("input", {}).get("url")}
 
 JSON:
@@ -64,16 +81,16 @@ JSON:
 {json.dumps(analysis_json, ensure_ascii=False, indent=2)}
 ```
 
-{PROMPT_FA}
+{prompt}
 
-گزارش را به فارسی بنویس و از اعداد و درصدها استفاده نکن."""
+{language_instruction}"""
         
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {
                     "role": "system",
-                    "content": PROMPT_FA
+                    "content": prompt
                 },
                 {
                     "role": "user",
@@ -84,7 +101,7 @@ JSON:
             max_tokens=2000
         )
         
-        return response.choices[0].message.content or "گزارش تولید نشد."
+        return response.choices[0].message.content or error_message
         
     except Exception as e:
         # Re-raise the exception to be handled by the route
