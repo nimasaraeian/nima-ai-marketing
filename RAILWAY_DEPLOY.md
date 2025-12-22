@@ -1,29 +1,32 @@
 # Railway Deployment Configuration
 
 ## Entrypoint
-- **Module Path**: `api.main:app`
-- **File**: `api/main.py` (line 158: `app = FastAPI(...)`)
-- **FastAPI App Object**: `app`
+- **Module Path**: `api.app:app` (CANONICAL - use this)
+- **File**: `api/app.py` (imports app from `api.main`)
+- **FastAPI App Object**: `app` (from `api.main`)
+- **Note**: `api.app.py` is a wrapper that ensures we use the complete app with ALL routers
 
 ## Start Command
 
 ### Option 1: Using Procfile (Recommended)
 Railway will automatically use the `Procfile` if present:
 ```
-web: uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8080} --timeout-keep-alive 75
+web: uvicorn api.app:app --host 0.0.0.0 --port ${PORT:-8080} --timeout-keep-alive 75
 ```
 
 ### Option 2: Custom Start Command in Railway Settings
 If Procfile is not used, set Custom Start Command to:
 ```
-uvicorn api.main:app --host 0.0.0.0 --port $PORT
+uvicorn api.app:app --host 0.0.0.0 --port $PORT
 ```
 
 ### Option 3: Using Dockerfile
 If using Dockerfile, it uses `start.sh` which runs:
 ```bash
-uvicorn api.main:app --host 0.0.0.0 --port "$PORT" --timeout-keep-alive 75
+uvicorn api.app:app --host 0.0.0.0 --port "$PORT" --timeout-keep-alive 75
 ```
+
+**IMPORTANT**: Always use `api.app:app` (not `api.main:app`) to ensure the canonical entrypoint is used.
 
 ## Static File Mounts
 
@@ -49,28 +52,40 @@ Both mounts are defined in `api/main.py` (lines 179-180) **BEFORE** any `include
 
 After deployment, verify:
 
-1. Health check works:
+1. Build info (verify correct module):
+   ```bash
+   curl https://<your-domain>/api/_build
+   # Should return: {"module":"api.main", "app_file":"/app/api/main.py", ...}
+   ```
+
+2. Health check works:
    ```bash
    curl https://<your-domain>/health
    # Should return: {"status":"ok"}
    ```
 
-2. Artifacts mount works:
+3. Artifacts mount works:
    ```bash
    curl https://<your-domain>/api/artifacts/_health
    # Should return: {"exists":true, "is_dir":true, "path":"...", "sample_files":[...]}
    ```
 
-3. Debug shots mount works:
+4. Debug shots mount works:
    ```bash
    curl https://<your-domain>/api/debug_shots/_health
    # Should return: {"exists":true, "is_dir":true, "path":"...", "sample_files":[...]}
    ```
 
-4. OpenAPI includes endpoints:
+5. OpenAPI includes endpoints:
    ```bash
    curl https://<your-domain>/openapi.json | grep -i "artifacts/_health"
    # Should show the endpoint in the schema
+   
+   curl https://<your-domain>/openapi.json | grep -i "analyze/url-human"
+   # Should show the endpoint
+   
+   curl https://<your-domain>/openapi.json | grep -i "decision-engine/report-from-url"
+   # Should show the endpoint
    ```
 
 ## Port Configuration

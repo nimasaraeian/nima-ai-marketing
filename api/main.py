@@ -1281,6 +1281,46 @@ def health():
     return {"status": "ok"}
 
 
+@app.get("/api/_build")
+def build_info():
+    """
+    Debug endpoint to verify which app module is running.
+    
+    Returns:
+        Build information including module name, timestamp, and git SHA
+    """
+    import datetime
+    import os
+    
+    # Get module name
+    module_name = __name__
+    
+    # Get build timestamp
+    build_ts = datetime.datetime.utcnow().isoformat() + "Z"
+    
+    # Get git commit SHA from Railway or environment
+    git_sha = (
+        os.getenv("RAILWAY_GIT_COMMIT_SHA") or
+        os.getenv("GIT_COMMIT_SHA") or
+        os.getenv("COMMIT_SHA") or
+        "unknown"
+    )
+    
+    # Get Railway deployment info
+    railway_env = os.getenv("RAILWAY_ENVIRONMENT")
+    railway_service = os.getenv("RAILWAY_SERVICE_NAME")
+    
+    return {
+        "module": module_name,
+        "app_file": __file__,
+        "timestamp": build_ts,
+        "git_sha": git_sha,
+        "railway_environment": railway_env,
+        "railway_service": railway_service,
+        "port": os.getenv("PORT", "not_set")
+    }
+
+
 @app.get("/api/artifacts/{filename}")
 async def get_artifact(filename: str):
     """Serve screenshot files from artifacts directory."""
