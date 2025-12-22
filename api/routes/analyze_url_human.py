@@ -49,7 +49,10 @@ def _public_file_url(
         return None
     
     p = Path(abs_path)
-    base_url = str(request.base_url).rstrip("/")
+    # Use x-forwarded-proto and host headers for Railway compatibility
+    proto = request.headers.get("x-forwarded-proto", "http")
+    host = request.headers.get("host")
+    base_url = f"{proto}://{host}" if host else str(request.base_url).rstrip("/")
     return f"{base_url}{mount_prefix}/{p.name}"
 
 
