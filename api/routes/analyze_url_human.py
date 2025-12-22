@@ -5,7 +5,7 @@ and generates a human report via OpenAI.
 """
 import sys
 import asyncio
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl, field_validator
 from typing import Optional, Literal, Dict, Any
@@ -176,11 +176,12 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest) -> Dict[str, Any]:
             },
             "findings": findings.get("findings", {}),
             # Include minimal capture info (not full HTML)
+            # Convert absolute paths to public URLs
             "capture_info": {
                 "timestamp": capture.get("timestamp_utc"),
                 "screenshots": {
-                    "above_the_fold": capture.get("screenshots", {}).get("above_the_fold"),
-                    "full_page": capture.get("screenshots", {}).get("full_page"),
+                    "above_the_fold": file_url(request, "api/artifacts", capture.get("screenshots", {}).get("above_the_fold")),
+                    "full_page": file_url(request, "api/artifacts", capture.get("screenshots", {}).get("full_page")),
                 },
                 "title": capture.get("dom", {}).get("title"),
             },

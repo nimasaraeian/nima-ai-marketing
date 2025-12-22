@@ -68,8 +68,12 @@ def run_visual_trust_from_bytes(image_bytes: bytes) -> dict:
         if not image_bytes or len(image_bytes) < 100:
             return vt_fallback("Invalid screenshot: bytes too small or empty", "VT_FALLBACK_INVALID")
         
-        # Run analysis with safe error handling
-        analysis = analyze_image_trust_bytes(image_bytes)
+        # Run analysis with safe error handling - MUST BE FAIL-SAFE
+        try:
+            analysis = analyze_image_trust_bytes(image_bytes)
+        except Exception as e:
+            logger.exception("VisualTrust analysis crashed: %s", e)
+            return vt_fallback(f"Visual analysis crashed: {str(e)[:200]}", "VT_FALLBACK_SAFE")
         
         # Validate analysis is a dict
         if not isinstance(analysis, dict):

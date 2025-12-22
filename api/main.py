@@ -160,13 +160,23 @@ app = FastAPI(title="Nima AI Brain API", version="1.0.0")
 # Canonical uvicorn command (for documentation):
 # uvicorn api.main:app --host 0.0.0.0 --port $PORT
 
-# Mount static files for debug_shots directory
+# Mount static files for BOTH artifacts and debug_shots directories
 # Use shared config to ensure consistency across all screenshot generation code
 from api.core.config import get_debug_shots_dir
-DEBUG_SHOTS_DIR = get_debug_shots_dir()
 
-# Mount the debug_shots directory as static files
+APP_DIR = Path(__file__).resolve().parent  # /app/api in container, api/ locally
+
+# Artifacts directory (used by analyze_url_human)
+ARTIFACTS_DIR = (APP_DIR / "artifacts").resolve()
+DEBUG_SHOTS_DIR = get_debug_shots_dir()  # Uses shared config
+
+# Ensure directories exist
+ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+DEBUG_SHOTS_DIR.mkdir(parents=True, exist_ok=True)
+
+# Mount BOTH directories as static files
 # IMPORTANT: Mount must be defined BEFORE include_router calls to avoid route conflicts
+app.mount("/api/artifacts", StaticFiles(directory=str(ARTIFACTS_DIR)), name="artifacts")
 app.mount("/api/debug_shots", StaticFiles(directory=str(DEBUG_SHOTS_DIR)), name="debug_shots")
 
 # Startup event: Log environment configuration (non-blocking)
@@ -1287,6 +1297,30 @@ async def get_artifact(filename: str):
         media_type=content_type,
         filename=filename
     )
+
+
+@app.get("/api/artifacts/_health")
+def artifacts_health():
+    """Health check endpoint for artifacts directory."""
+    sample_files = []
+    if ARTIFACTS_DIR.exists():
+        try:
+            # Get 5 most recent PNG files
+            png_files = sorted(
+                ARTIFACTS_DIR.glob("*.png"),
+                key=lambda x: x.stat().st_mtime,
+                reverse=True
+            )[:5]
+            sample_files = [p.name for p in png_files]
+        except Exception:
+            pass
+    
+    return {
+        "exists": ARTIFACTS_DIR.exists(),
+        "is_dir": ARTIFACTS_DIR.is_dir() if ARTIFACTS_DIR.exists() else False,
+        "path": str(ARTIFACTS_DIR),
+        "sample_files": sample_files
+    }
 
 
 @app.get("/api/debug_shots/_health")
