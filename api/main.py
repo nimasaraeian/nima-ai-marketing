@@ -1371,48 +1371,31 @@ async def get_artifact(filename: str):
 @app.get("/api/artifacts/_health")
 def artifacts_health():
     """Health check endpoint for artifacts directory."""
-    sample_files = []
-    if ARTIFACTS_DIR.exists():
-        try:
-            # Get 5 most recent PNG files
-            png_files = sorted(
-                ARTIFACTS_DIR.glob("*.png"),
-                key=lambda x: x.stat().st_mtime,
-                reverse=True
-            )[:5]
-            sample_files = [p.name for p in png_files]
-        except Exception:
-            pass
-    
     return {
         "exists": ARTIFACTS_DIR.exists(),
         "is_dir": ARTIFACTS_DIR.is_dir() if ARTIFACTS_DIR.exists() else False,
-        "path": str(ARTIFACTS_DIR),
-        "sample_files": sample_files
+        "path": str(ARTIFACTS_DIR)
     }
 
 
 @app.get("/api/debug_shots/_health")
 def debug_shots_health():
     """Health check endpoint for debug_shots directory."""
-    sample_files = []
-    if DEBUG_SHOTS_DIR.exists():
-        try:
-            # Get 5 most recent PNG files
-            png_files = sorted(
-                DEBUG_SHOTS_DIR.glob("*.png"),
-                key=lambda x: x.stat().st_mtime,
-                reverse=True
-            )[:5]
-            sample_files = [p.name for p in png_files]
-        except Exception:
-            pass
-    
     return {
         "exists": DEBUG_SHOTS_DIR.exists(),
         "is_dir": DEBUG_SHOTS_DIR.is_dir() if DEBUG_SHOTS_DIR.exists() else False,
-        "path": str(DEBUG_SHOTS_DIR),
-        "sample_files": sample_files
+        "path": str(DEBUG_SHOTS_DIR)
+    }
+
+
+@app.get("/api/_version")
+def version():
+    """Version endpoint to confirm deploy and directory paths."""
+    import os
+    return {
+        "git_sha": os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("GIT_SHA") or "unknown",
+        "artifacts_dir": str(ARTIFACTS_DIR),
+        "debug_shots_dir": str(DEBUG_SHOTS_DIR)
     }
 
 
