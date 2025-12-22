@@ -171,14 +171,13 @@ app = FastAPI(title="Nima AI Brain API", version="1.0.0")
 # Canonical uvicorn command (for documentation):
 # uvicorn api.main:app --host 0.0.0.0 --port $PORT
 
-# Mount static files for BOTH artifacts and debug_shots directories
-# Use shared config to ensure consistency across all screenshot generation code
-from api.core.config import get_debug_shots_dir
+# IMMEDIATELY after app creation: Set up static file mounts
+# This ensures mounts are registered before any routers
+from pathlib import Path
+from fastapi.staticfiles import StaticFiles
 
-# Define standard paths at module level
+# Define standard paths
 API_DIR = Path(__file__).resolve().parent  # /app/api in container, api/ locally
-
-# Artifacts directory (used by analyze_url_human)
 ARTIFACTS_DIR = (API_DIR / "artifacts").resolve()
 DEBUG_SHOTS_DIR = (API_DIR / "debug_shots").resolve()
 
@@ -186,8 +185,8 @@ DEBUG_SHOTS_DIR = (API_DIR / "debug_shots").resolve()
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
 DEBUG_SHOTS_DIR.mkdir(parents=True, exist_ok=True)
 
-# Mount BOTH directories as static files
-# IMPORTANT: Mount must be defined BEFORE include_router calls to avoid route conflicts
+# Mount static file directories
+# IMPORTANT: Mounts MUST be defined BEFORE include_router calls to avoid route conflicts
 app.mount("/api/artifacts", StaticFiles(directory=str(ARTIFACTS_DIR)), name="artifacts")
 app.mount("/api/debug_shots", StaticFiles(directory=str(DEBUG_SHOTS_DIR)), name="debug_shots")
 
