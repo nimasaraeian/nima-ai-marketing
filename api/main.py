@@ -1439,6 +1439,9 @@ def list_artifacts():
                     "exists": True
                 })
         
+        # Sort by modified time (newest first)
+        files.sort(key=lambda x: x["modified"], reverse=True)
+        
         # Also check if directory is readable
         return {
             "path": str(ARTIFACTS_DIR),
@@ -1448,9 +1451,6 @@ def list_artifacts():
             "files_count": len(files),
             "files": files
         }
-        
-        # Sort by modified time (newest first)
-        files.sort(key=lambda x: x["modified"], reverse=True)
         
         return {
             "path": str(ARTIFACTS_DIR),
