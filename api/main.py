@@ -84,18 +84,43 @@ from api.psychology_engine import (
 from api.rewrite_engine import rewrite_text
 from api.models.rewrite_models import RewriteInput, RewriteOutput
 from api.decision_engine import router as decision_engine_router
+# Check OpenCV availability first
+try:
+    import cv2  # noqa: F401
+    OPENCV_AVAILABLE = True
+except Exception:
+    OPENCV_AVAILABLE = False
+
+# Check if local visual extractor can be loaded
+extractor_loaded_ok = False
+try:
+    from api.vision.local_visual_extractor import extract_visual_elements
+    extractor_loaded_ok = True
+except Exception:
+    extractor_loaded_ok = False
+
 # Lazy import VisualTrust to prevent startup crashes
 VISUAL_TRUST_AVAILABLE = False
-try:
-    from api.visual_trust_engine import analyze_visual_trust_from_path
-    VISUAL_TRUST_AVAILABLE = True
-except (ImportError, Exception) as e:
-    # VisualTrust not available - app will still start
-    analyze_visual_trust_from_path = None
+analyze_visual_trust_from_path = None
+if OPENCV_AVAILABLE and extractor_loaded_ok:
+    try:
+        from api.visual_trust_engine import analyze_visual_trust_from_path
+        VISUAL_TRUST_AVAILABLE = True
+    except (ImportError, Exception) as e:
+        # VisualTrust not available - app will still start
+        import logging
+        logger = logging.getLogger("brain")
+        logger.warning(f"VisualTrust import failed (non-fatal): {e}")
+        print(f"⚠️  VisualTrust not available: {e}")
+else:
     import logging
     logger = logging.getLogger("brain")
-    logger.warning(f"VisualTrust import failed (non-fatal): {e}")
-    print(f"⚠️  VisualTrust not available: {e}")
+    if not OPENCV_AVAILABLE:
+        logger.warning("OpenCV not available - VisualTrust will use fallback mode")
+        print("⚠️  OpenCV not available - VisualTrust will use fallback mode")
+    if not extractor_loaded_ok:
+        logger.warning("Local visual extractor not available - VisualTrust will use fallback mode")
+        print("⚠️  Local visual extractor not available - VisualTrust will use fallback mode")
 # TensorFlow removed - no model loading needed
 from api.routes.image_trust_local import router as image_trust_local_router
 from api.routes.image_trust import router as image_trust_router
@@ -2203,7 +2228,7 @@ async def psychology_analysis_with_image(
                 visual_layer = {
                     "visual_trust_label": "N/A",
                     "visual_trust_score": None,
-                    "visual_comment": "Visual trust analysis uses OpenCV + local extractor (no TensorFlow model required)"
+                    "visual_comment": "Visual trust analysis in fallback mode (OpenCV or extractor not available)" if not VISUAL_TRUST_AVAILABLE else "Visual trust analysis uses OpenCV + local extractor (no TensorFlow model required)"
                 }
                 # Build fallback VisualTrustResult - Temporarily disabled
                 # visual_trust_result = _build_visual_trust_result(
