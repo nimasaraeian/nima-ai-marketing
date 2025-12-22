@@ -1907,6 +1907,7 @@ async def decision_engine_report_from_url(payload: ReportFromUrlInput):
             "url": url,
             "contentPreview": content_preview,
             "visualTrust": visual_trust_result,
+            "report": report_text,  # Add report at root level for frontend compatibility
             "decisionReport": {
                 "report": report_text,
                 "raw_analysis": decision_output,
