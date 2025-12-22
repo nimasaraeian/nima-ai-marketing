@@ -84,7 +84,18 @@ from api.psychology_engine import (
 from api.rewrite_engine import rewrite_text
 from api.models.rewrite_models import RewriteInput, RewriteOutput
 from api.decision_engine import router as decision_engine_router
-from api.visual_trust_engine import analyze_visual_trust_from_path
+# Lazy import VisualTrust to prevent startup crashes
+VISUAL_TRUST_AVAILABLE = False
+try:
+    from api.visual_trust_engine import analyze_visual_trust_from_path
+    VISUAL_TRUST_AVAILABLE = True
+except (ImportError, Exception) as e:
+    # VisualTrust not available - app will still start
+    analyze_visual_trust_from_path = None
+    import logging
+    logger = logging.getLogger("brain")
+    logger.warning(f"VisualTrust import failed (non-fatal): {e}")
+    print(f"⚠️  VisualTrust not available: {e}")
 # TensorFlow removed - no model loading needed
 from api.routes.image_trust_local import router as image_trust_local_router
 from api.routes.image_trust import router as image_trust_router
@@ -788,7 +799,10 @@ def _safe_visual_trust_analysis(
         with tmp_path.open("wb") as buffer:
             buffer.write(image_bytes)
 
-        vt = analyze_visual_trust_from_path(str(tmp_path))
+        if VISUAL_TRUST_AVAILABLE and analyze_visual_trust_from_path:
+            vt = analyze_visual_trust_from_path(str(tmp_path))
+        else:
+            vt = {"trust_label": "unknown", "trust_scores": {}, "trust_score_numeric": 0.0}
         trust_scores = vt.get("trust_scores") or {}
 
         return {
@@ -2163,7 +2177,10 @@ async def psychology_analysis_with_image(
             
             print(f"[VISUAL_ANALYSIS] Image saved to: {tmp_path} ({tmp_path.stat().st_size} bytes)")
             
+            if VISUAL_TRUST_AVAILABLE and analyze_visual_trust_from_path:
             vt = analyze_visual_trust_from_path(str(tmp_path))
+        else:
+            vt = None
             print(f"[VISUAL_ANALYSIS] Visual trust analysis completed: {vt.get('trust_label', 'unknown')}")
 
             visual_trust = {

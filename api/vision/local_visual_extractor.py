@@ -465,26 +465,31 @@ def _extract_color_palette(img: np.ndarray, box: Tuple[int, int, int, int] | Non
             return {"dominant_colors": dominant_colors}
         except ImportError:
             # Fallback if sklearn not available - use simple histogram approach
-        small = cv2.resize(region, (50, 50))
-        pixels = small.reshape(-1, 3)
-        pixels_rgb = cv2.cvtColor(small.reshape(1, -1, 3), cv2.COLOR_BGR2RGB).reshape(-1, 3)
-        
-        # Simple histogram-based approach
-        hist_r = np.histogram(pixels_rgb[:, 0], bins=10)[0]
-        hist_g = np.histogram(pixels_rgb[:, 1], bins=10)[0]
-        hist_b = np.histogram(pixels_rgb[:, 2], bins=10)[0]
-        
-        dominant_r = int(np.argmax(hist_r) * 25.5)
-        dominant_g = int(np.argmax(hist_g) * 25.5)
-        dominant_b = int(np.argmax(hist_b) * 25.5)
-        
-        return {
-            "dominant_colors": [{
-                "rgb": [dominant_r, dominant_g, dominant_b],
-                "hex": f"#{dominant_r:02x}{dominant_g:02x}{dominant_b:02x}",
-                "frequency": 1.0
-            }]
-        }
+            try:
+                small = cv2.resize(region, (50, 50))
+                pixels = small.reshape(-1, 3)
+                pixels_rgb = cv2.cvtColor(small.reshape(1, -1, 3), cv2.COLOR_BGR2RGB).reshape(-1, 3)
+                
+                # Simple histogram-based approach
+                hist_r = np.histogram(pixels_rgb[:, 0], bins=10)[0]
+                hist_g = np.histogram(pixels_rgb[:, 1], bins=10)[0]
+                hist_b = np.histogram(pixels_rgb[:, 2], bins=10)[0]
+                
+                dominant_r = int(np.argmax(hist_r) * 25.5)
+                dominant_g = int(np.argmax(hist_g) * 25.5)
+                dominant_b = int(np.argmax(hist_b) * 25.5)
+                
+                return {
+                    "dominant_colors": [{
+                        "rgb": [dominant_r, dominant_g, dominant_b],
+                        "hex": f"#{dominant_r:02x}{dominant_g:02x}{dominant_b:02x}",
+                        "frequency": 1.0
+                    }]
+                }
+            except Exception as resize_error:
+                # If resize or processing fails, return empty colors
+                logger.debug("Fallback color extraction failed: %s", resize_error)
+                return {"dominant_colors": []}
     except Exception as e:
         logger.debug("Color extraction failed: %s", e)
         return {"dominant_colors": []}
