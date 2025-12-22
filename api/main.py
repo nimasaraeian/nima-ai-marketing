@@ -210,8 +210,8 @@ origins = [
     "https://nimasaraeian.com",
     "https://www.nimasaraeian.com",
     "https://nima-ai-marketing.onrender.com",  # Render deployment
-    # Railway deployment: Add your Railway domain here after deploy
-    # Example: "https://your-app-name.up.railway.app"
+    "https://nima-ai-marketing-production.up.railway.app",  # Railway production deployment (old)
+    "https://nima-ai-marketing-production-82df.up.railway.app",  # Railway production deployment (current)
     "http://localhost:3000",  # DEV: Next.js default port
     "http://127.0.0.1:3000",  # DEV: Next.js default port
     "http://localhost:3001",  # DEV: Alternative Next.js port
@@ -224,6 +224,10 @@ origins = [
 
 # In local development, allow all localhost origins for flexibility
 from api.core.config import is_local_dev
+
+# Check if we're in Railway (Railway sets RAILWAY_ENVIRONMENT)
+is_railway = os.getenv("RAILWAY_ENVIRONMENT") is not None or os.getenv("RAILWAY_SERVICE_NAME") is not None
+
 if is_local_dev():
     # In local dev, allow all origins for easier development
     # This allows any localhost port to connect
@@ -231,6 +235,25 @@ if is_local_dev():
         CORSMiddleware,
         allow_origins=["*"],  # Allow all origins in local dev
         allow_credentials=False,  # Must be False when allow_origins is ["*"]
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+elif is_railway:
+    # Railway: Allow all Railway subdomains dynamically
+    # FastAPI doesn't support wildcards, so we use a custom function
+    def is_railway_origin(origin: str) -> bool:
+        """Check if origin is a Railway subdomain."""
+        return (
+            origin.endswith(".up.railway.app") or
+            origin.endswith(".railway.app") or
+            origin in origins
+        )
+    
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"https://.*\.up\.railway\.app",  # Regex for Railway subdomains
+        allow_origins=origins,  # Also allow specific origins
+        allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
     )
