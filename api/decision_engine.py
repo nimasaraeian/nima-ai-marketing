@@ -21,6 +21,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 from openai import OpenAI
 from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import Request as FastAPIRequest
 import httpx
 from bs4 import BeautifulSoup
 import asyncio
@@ -1770,7 +1771,7 @@ def _extract_content_from_html(html: str, max_chars: int = 6000) -> str:
 
 
 @router.post("/decision-engine/report-from-url")
-async def decision_engine_report_from_url(payload: ReportFromUrlInput, request: Request = None):
+async def decision_engine_report_from_url(payload: ReportFromUrlInput, request: FastAPIRequest):
     """
     Generate decision engine report from URL.
     
