@@ -121,7 +121,7 @@ async def test_capture_only(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         full_url = f"{base_url}/api/artifacts/{full_filename}" if full_filename else None
         
         return {
-            "status": "ok",
+            "analysisStatus": "ok",
             "url": payload.url,
             "capture": {
                 "timestamp": capture.get("timestamp_utc"),
@@ -137,7 +137,13 @@ async def test_capture_only(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         import traceback
         error_detail = str(e) if str(e) else f"{type(e).__name__}: An error occurred"
         traceback.print_exc()
-        raise HTTPException(status_code=500, detail=error_detail)
+        # Return error response with analysisStatus instead of raising HTTPException
+        return {
+            "analysisStatus": "error",
+            "url": payload.url,
+            "error": error_detail,
+            "capture": None
+        }
 
 @router.post("/api/analyze/url-human")
 async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIRequest) -> Dict[str, Any]:
