@@ -1,52 +1,29 @@
-#!/usr/bin/env python3
-"""
-Startup script for Railway deployment.
-Reads PORT from environment and starts uvicorn server.
-"""
+# start.py
 import os
-import sys
+import builtins
 
-# Get PORT from environment, default to 8000
-# IMPORTANT: Convert to int to ensure it's a valid integer
-port_str = os.getenv("PORT", "8000")
-try:
-    port = int(port_str)
-except (ValueError, TypeError):
-    print(f"ERROR: Invalid PORT value: '{port_str}'. Using default 8000.")
-    port = 8000
+# --- HARD GUARANTEE: LOADER_DIR ALWAYS EXISTS ---
+PROJECT_ROOT = os.path.abspath(os.path.dirname(__file__))
+builtins.LOADER_DIR = os.environ.get(
+    "LOADER_DIR",
+    os.path.join(PROJECT_ROOT, "loaders")
+)
+builtins.LOADER_DIR = os.path.abspath(builtins.LOADER_DIR)
+os.environ["LOADER_DIR"] = builtins.LOADER_DIR
 
-print("=" * 50)
-print("Starting NIMA AI Marketing API...")
-print("=" * 50)
-print(f"PORT is: {port} (type: {type(port).__name__})")
-print(f"PORT from env: '{port_str}'")
-print(f"Python version: {sys.version}")
-print(f"Working directory: {os.getcwd()}")
-print("=" * 50)
+print("BOOT OK | LOADER_DIR =", builtins.LOADER_DIR)
 
-# Start uvicorn
-# IMPORTANT: Pass port as string (uvicorn expects string)
-cmd = [
-    "uvicorn",
-    "api.main:app",
-    "--host", "0.0.0.0",
-    "--port", str(port),  # Convert to string for uvicorn
-    "--timeout-keep-alive", "75",
-    "--access-log"
-]
+# --- NOW import the app ---
+from api.main import app
 
-print(f"Executing: {' '.join(cmd)}")
-print("=" * 50)
+import uvicorn
 
-try:
-    os.execvp("uvicorn", cmd)
-except FileNotFoundError:
-    print("ERROR: uvicorn not found. Make sure it's installed.")
-    print("Install with: pip install uvicorn[standard]")
-    sys.exit(1)
-except Exception as e:
-    print(f"ERROR: Failed to start server: {e}")
-    import traceback
-    traceback.print_exc()
-    sys.exit(1)
-
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(
+        app,  # Use the imported app directly, not string reference
+        host="0.0.0.0",
+        port=port,
+        timeout_keep_alive=75,
+        log_level="info",
+    )

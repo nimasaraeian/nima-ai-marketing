@@ -1859,27 +1859,33 @@ async def decision_engine_report_from_url(payload: ReportFromUrlInput):
         }
     
     # Step 3: Capture screenshot (using internal function, not HTTP)
+    screenshot_bytes = None
     try:
         from api.services.screenshot import capture_url_png_bytes
         screenshot_bytes = await asyncio.to_thread(capture_url_png_bytes, url)
     except Exception as e:
-        logger.exception(f"Failed to capture screenshot: {e}")
-        return {
-            "analysisStatus": "error",
-            "step": "screenshot",
-            "errorMessage": f"Failed to capture screenshot: {str(e)[:200]}"
-        }
+        logger.warning(f"Failed to capture screenshot (continuing without visual analysis): {e}")
+        # Continue without screenshot - we can still generate text-based report
     
     # Step 4: Run visual trust analysis (using internal function, not HTTP)
-    try:
-        from api.visual_trust_engine import run_visual_trust_from_bytes
-        visual_trust_result = run_visual_trust_from_bytes(screenshot_bytes)
-    except Exception as e:
-        logger.exception(f"Failed to analyze visual trust: {e}")
-        return {
-            "analysisStatus": "error",
-            "step": "vision",
-            "errorMessage": f"Failed to analyze visual trust: {str(e)[:200]}"
+    visual_trust_result = None
+    if screenshot_bytes:
+        try:
+            from api.visual_trust_engine import run_visual_trust_from_bytes
+            visual_trust_result = run_visual_trust_from_bytes(screenshot_bytes)
+        except Exception as e:
+            logger.warning(f"Failed to analyze visual trust (continuing without visual analysis): {e}")
+            # Continue without visual trust - we can still generate text-based report
+            visual_trust_result = {
+                "analysisStatus": "skipped",
+                "label": "Unknown",
+                "error": f"Visual analysis unavailable: {str(e)[:100]}"
+            }
+    else:
+        visual_trust_result = {
+            "analysisStatus": "skipped",
+            "label": "Unknown",
+            "error": "Screenshot capture failed, visual analysis skipped"
         }
     
     # Step 5: Build payload and call decision engine report internally
@@ -1912,11 +1918,12 @@ async def decision_engine_report_from_url(payload: ReportFromUrlInput):
             # If formatter fails, use raw output
             report_text = json.dumps(decision_output, indent=2)
         
-        return {
+        # Ensure report is always included in response
+        response = {
             "analysisStatus": "ok",
             "url": url,
             "contentPreview": content_preview,
-            "visualTrust": visual_trust_result,
+            "visualTrust": visual_trust_result or {"analysisStatus": "skipped"},
             "report": report_text,  # Add report at root level for frontend compatibility
             "human_report": report_text,  # Add human_report for frontend compatibility
             "decisionReport": {
@@ -1925,6 +1932,12 @@ async def decision_engine_report_from_url(payload: ReportFromUrlInput):
                 "format": "markdown"
             }
         }
+        
+        # Log response structure for debugging
+        logger.info(f"Report generated successfully. Report length: {len(report_text)} chars")
+        logger.debug(f"Response keys: {list(response.keys())}")
+        
+        return response
     except Exception as e:
         logger.exception(f"Failed to generate decision report: {e}")
         error_message = str(e)
@@ -1942,10 +1955,24 @@ async def decision_engine_report_from_url(payload: ReportFromUrlInput):
         else:
             user_message = f"Failed to generate decision report: {error_message[:200]}"
         
+        # Always include report field even in error case (with error message)
+        error_report = f"# Decision Analysis Report\n\n## Error\n\n{user_message}\n\n*This report could not be generated due to an error.*"
+        
         return {
             "analysisStatus": "error",
             "step": "report",
-            "errorMessage": user_message
+            "errorMessage": user_message,
+            "url": url,
+            "contentPreview": content_preview if 'content_preview' in locals() else None,
+            "visualTrust": visual_trust_result if 'visual_trust_result' in locals() else None,
+            "report": error_report,  # Always include report field
+            "human_report": error_report,
+            "decisionReport": {
+                "report": error_report,
+                "raw_analysis": None,
+                "format": "markdown",
+                "error": user_message
+            }
         }
 
 
