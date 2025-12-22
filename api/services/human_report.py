@@ -20,30 +20,7 @@ else:
     else:
         load_dotenv()  # Load from current directory or system env
 
-# Get API key with fallback to direct file reading
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
-if not OPENAI_API_KEY:
-    # Try reading directly from .env file (fallback for cases where dotenv doesn't work)
-    if env_file.exists():
-        try:
-            with open(env_file, 'r', encoding='utf-8-sig') as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith('#') and 'OPENAI_API_KEY' in line:
-                        if '=' in line:
-                            key, value = line.split('=', 1)
-                            key = key.strip()
-                            value = value.strip()
-                            if key == 'OPENAI_API_KEY':
-                                # Remove quotes
-                                if value.startswith('"') and value.endswith('"'):
-                                    value = value[1:-1]
-                                elif value.startswith("'") and value.endswith("'"):
-                                    value = value[1:-1]
-                                OPENAI_API_KEY = value
-                                break
-        except Exception:
-            pass
 
 PROMPT_FA = """تو یک Conversion & Decision UX Auditor هستی.
 
@@ -110,10 +87,6 @@ JSON:
         return response.choices[0].message.content or "گزارش تولید نشد."
         
     except Exception as e:
-        # Check if it's an API key error
-        error_str = str(e).lower()
-        if "api key" in error_str or "authentication" in error_str or "401" in error_str:
-            raise RuntimeError("LLM_UNAVAILABLE")
-        # Re-raise other exceptions
+        # Re-raise the exception to be handled by the route
         raise RuntimeError(f"LLM_ERROR: {str(e)}") from e
 
