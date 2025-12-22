@@ -264,6 +264,42 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         atf_filename = screenshots_raw.get("above_the_fold")
         full_filename = screenshots_raw.get("full_page")
         
+        # Post-capture verification: Check files actually exist and are accessible
+        import os
+        from api.paths import ARTIFACTS_DIR
+        
+        atf_path = ARTIFACTS_DIR / atf_filename if atf_filename else None
+        full_path = ARTIFACTS_DIR / full_filename if full_filename else None
+        
+        verification_errors = []
+        if atf_path and not os.path.exists(str(atf_path)):
+            verification_errors.append(f"ATF screenshot missing: {atf_path}")
+        elif atf_path and os.path.getsize(str(atf_path)) == 0:
+            verification_errors.append(f"ATF screenshot is empty: {atf_path}")
+        
+        if full_path and not os.path.exists(str(full_path)):
+            verification_errors.append(f"Full page screenshot missing: {full_path}")
+        elif full_path and os.path.getsize(str(full_path)) == 0:
+            verification_errors.append(f"Full page screenshot is empty: {full_path}")
+        
+        if verification_errors:
+            error_msg = "; ".join(verification_errors)
+            logger.error(f"[analyze_url_human] Artifact verification failed: {error_msg}")
+            return {
+                "analysisStatus": "error",
+                "url": str(payload.url),
+                "error": {
+                    "message": error_msg,
+                    "stage": "artifact_missing"
+                },
+                "human_report": None,
+                "summary": None,
+                "findings": None,
+                "capture_info": None,
+                "page_map": None,
+                "screenshots": None
+            }
+        
         # Use x-forwarded-proto and host headers for Railway compatibility
         proto = request.headers.get("x-forwarded-proto", "http")
         host = request.headers.get("host")
