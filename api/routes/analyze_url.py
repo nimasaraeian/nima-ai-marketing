@@ -10,7 +10,7 @@ import os
 import httpx
 from bs4 import BeautifulSoup
 from fastapi import APIRouter, Query, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 
 try:
@@ -27,7 +27,7 @@ from api.schemas.page_features import (
 )
 from api.brain.decision_brain import analyze_decision
 from api.visual_trust_engine import run_visual_trust_from_bytes
-from api.services.screenshot import capture_url_png_bytes
+from api.services.screenshot import capture_url_png_bytes, capture_url_png_bytes_mobile
 from api.utils.text_sanitize import sanitize_any
 from api.services.signal_detector_v1 import build_signal_report_v1
 from api.services.decision_logic_v1 import build_decision_logic_v1
@@ -71,13 +71,13 @@ def extract_text(html: str) -> str:
     return "\n".join(text.splitlines()[:250])
 
 
-async def render_screenshot(url: str, timeout: int = 30) -> bytes:
+async def render_screenshot(url: str, timeout: int = 60) -> bytes:
     """
     Render screenshot with timeout protection.
     
     Args:
         url: URL to screenshot
-        timeout: Maximum time in seconds to wait
+        timeout: Maximum time in seconds to wait (default: 60)
         
     Returns:
         Screenshot bytes
@@ -91,8 +91,32 @@ async def render_screenshot(url: str, timeout: int = 30) -> bytes:
             timeout=timeout
         )
     except asyncio.TimeoutError:
-        logger.error("Screenshot capture timed out after %d seconds", timeout)
-        raise
+        logger.error("Screenshot capture timed out after %d seconds for URL: %s", timeout, url)
+        raise TimeoutError(f"Screenshot capture timed out after {timeout} seconds for {url}")
+
+
+async def render_screenshot_mobile(url: str, timeout: int = 60) -> bytes:
+    """
+    Render mobile screenshot with timeout protection.
+    
+    Args:
+        url: URL to screenshot
+        timeout: Maximum time in seconds to wait (default: 60)
+        
+    Returns:
+        Screenshot bytes
+        
+    Raises:
+        TimeoutError: If screenshot capture exceeds timeout
+    """
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(capture_url_png_bytes_mobile, url),
+            timeout=timeout
+        )
+    except asyncio.TimeoutError:
+        logger.error("Mobile screenshot capture timed out after %d seconds for URL: %s", timeout, url)
+        raise TimeoutError(f"Mobile screenshot capture timed out after {timeout} seconds for {url}")
 
 
 @router.post("/analyze-url")
@@ -207,33 +231,90 @@ async def analyze_url(
         error_message = f"Fetch failed: {e}"
         logger.exception("HTML fetch failed")
 
-    # 2) Screenshot with timeout
+    # 2) Screenshots (Desktop and Mobile) with timeout
+    shot = b""
+    shot_mobile = b""
+    screenshot_error = None
+    screenshot_mobile_error = None
+    debug_path = None
+    debug_path_mobile = None
+    
+    # Desktop screenshot
     try:
-        shot = await render_screenshot(url, timeout=30)
+        logger.info(f"Attempting to capture desktop screenshot for {url}...")
+        shot = await render_screenshot(url, timeout=60)
         if not shot or not shot.startswith(b"\x89PNG"):
-            raise ValueError("Invalid screenshot")
-    except (PlaywrightTimeoutError, asyncio.TimeoutError, Exception) as e:
-        screenshot_error = str(e)
-        shot = b""
-        if isinstance(e, (asyncio.TimeoutError, PlaywrightTimeoutError)):
-            screenshot_error = f"Screenshot timeout: {e}"
-        logger.exception("Screenshot failed: %s", screenshot_error)
-
-    if shot:
+            raise ValueError("Invalid screenshot: PNG signature not found")
+        logger.info(f"Desktop screenshot captured successfully: {len(shot)} bytes")
+        
+        # Save desktop screenshot
         debug_dir = Path(__file__).parent.parent / "debug_shots"
         debug_dir.mkdir(exist_ok=True)
         ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-        debug_file = debug_dir / f"shot_{ts}.png"
+        debug_file = debug_dir / f"desktop_{ts}.png"
         debug_file.write_bytes(shot)
         debug_path = str(debug_file)
+    except (PlaywrightTimeoutError, asyncio.TimeoutError, Exception) as e:
+        screenshot_error = str(e)
+        shot = b""
+        error_type = type(e).__name__
+        
+        if isinstance(e, (asyncio.TimeoutError, PlaywrightTimeoutError)):
+            screenshot_error = f"Timeout: Page took more than 60 seconds to load. Please check the URL or try again."
+            logger.warning(f"Desktop screenshot timeout for {url}: {e}")
+        elif "Failed to navigate" in str(e) or "net::" in str(e):
+            screenshot_error = f"Network error: Could not access the website. The site may be unavailable or blocked."
+            logger.error(f"Network error during desktop screenshot for {url}: {e}")
+        elif "screenshot_invalid" in str(e) or "Invalid screenshot" in str(e):
+            screenshot_error = f"Invalid screenshot: {e}"
+            logger.error(f"Invalid desktop screenshot for {url}: {e}")
+        else:
+            screenshot_error = f"Screenshot capture failed ({error_type}): {e}"
+            logger.exception(f"Desktop screenshot failed for {url}: {error_type}: {e}")
+    
+    # Mobile screenshot
+    try:
+        logger.info(f"Attempting to capture mobile screenshot for {url}...")
+        shot_mobile = await render_screenshot_mobile(url, timeout=60)
+        if not shot_mobile or not shot_mobile.startswith(b"\x89PNG"):
+            raise ValueError("Invalid mobile screenshot: PNG signature not found")
+        logger.info(f"Mobile screenshot captured successfully: {len(shot_mobile)} bytes")
+        
+        # Save mobile screenshot
+        debug_dir = Path(__file__).parent.parent / "debug_shots"
+        debug_dir.mkdir(exist_ok=True)
+        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        debug_file_mobile = debug_dir / f"mobile_{ts}.png"
+        debug_file_mobile.write_bytes(shot_mobile)
+        debug_path_mobile = str(debug_file_mobile)
+    except (PlaywrightTimeoutError, asyncio.TimeoutError, Exception) as e:
+        screenshot_mobile_error = str(e)
+        shot_mobile = b""
+        error_type = type(e).__name__
+        
+        if isinstance(e, (asyncio.TimeoutError, PlaywrightTimeoutError)):
+            screenshot_mobile_error = f"Timeout: Page took more than 60 seconds to load. Please check the URL or try again."
+            logger.warning(f"Mobile screenshot timeout for {url}: {e}")
+        elif "Failed to navigate" in str(e) or "net::" in str(e):
+            screenshot_mobile_error = f"Network error: Could not access the website. The site may be unavailable or blocked."
+            logger.error(f"Network error during mobile screenshot for {url}: {e}")
+        elif "screenshot_invalid" in str(e) or "Invalid screenshot" in str(e):
+            screenshot_mobile_error = f"Invalid screenshot: {e}"
+            logger.error(f"Invalid mobile screenshot for {url}: {e}")
+        else:
+            screenshot_mobile_error = f"Mobile screenshot capture failed ({error_type}): {e}"
+            logger.exception(f"Mobile screenshot failed for {url}: {error_type}: {e}")
+    
+    # Use desktop screenshot for visual trust analysis (fallback to mobile if desktop failed)
+    shot_for_visual = shot if shot else shot_mobile
 
     # 3) Vision Trust Analysis with timeout and fail-safe handling
     visual = None
-    if shot and not screenshot_error and len(shot) > 100:
+    if shot_for_visual and len(shot_for_visual) > 100:
         try:
             # Run visual trust with timeout
             raw_visual = await asyncio.wait_for(
-                asyncio.to_thread(run_visual_trust_from_bytes, shot),
+                asyncio.to_thread(run_visual_trust_from_bytes, shot_for_visual),
                 timeout=30.0
             )
             
@@ -373,7 +454,7 @@ async def analyze_url(
     meta = MetaFeatures(
         url=url,
         timestamp=datetime.utcnow().isoformat(),
-        screenshot_bytes=len(shot),
+        screenshot_bytes=len(shot) if shot else len(shot_mobile) if shot_mobile else 0,
     )
 
     features = PageFeatures(
@@ -410,8 +491,32 @@ async def analyze_url(
         "features": features_dict,
         "brain": brain,
         "extractedText": extracted_text,
-        "debugScreenshotPath": debug_path,
-        "debugScreenshotBytes": len(shot),
+        "screenshots": {
+            "desktop": {
+                "path": debug_path.split("\\")[-1] if debug_path else None,  # Just filename
+                "url": f"/api/screenshots/{debug_path.split('\\')[-1]}" if debug_path else None,
+                "bytes": len(shot),
+                "error": screenshot_error
+            } if shot else {
+                "path": None,
+                "url": None,
+                "bytes": 0,
+                "error": screenshot_error
+            },
+            "mobile": {
+                "path": debug_path_mobile.split("\\")[-1] if debug_path_mobile else None,  # Just filename
+                "url": f"/api/screenshots/{debug_path_mobile.split('\\')[-1]}" if debug_path_mobile else None,
+                "bytes": len(shot_mobile),
+                "error": screenshot_mobile_error
+            } if shot_mobile else {
+                "path": None,
+                "url": None,
+                "bytes": 0,
+                "error": screenshot_mobile_error
+            }
+        },
+        "debugScreenshotPath": debug_path,  # Keep for backward compatibility
+        "debugScreenshotBytes": len(shot) if shot else len(shot_mobile) if shot_mobile else 0,
         "error": error_message,
         "debugBuild": "DEMO_READY_V1",
     }
@@ -491,7 +596,7 @@ async def analyze_url_signals(payload: UrlAnalyzeIn):
         if shot and shot.startswith(b"\x89PNG") and len(shot) > 100:
             try:
                 raw_visual = await asyncio.wait_for(
-                    asyncio.to_thread(run_visual_trust_from_bytes, shot),
+                    asyncio.to_thread(run_visual_trust_from_bytes, shot_for_visual),
                     timeout=30.0
                 )
                 if isinstance(raw_visual, dict):
@@ -651,7 +756,7 @@ async def analyze_url_decision(payload: UrlAnalyzeIn):
         if shot and shot.startswith(b"\x89PNG") and len(shot) > 100:
             try:
                 raw_visual = await asyncio.wait_for(
-                    asyncio.to_thread(run_visual_trust_from_bytes, shot),
+                    asyncio.to_thread(run_visual_trust_from_bytes, shot_for_visual),
                     timeout=30.0
                 )
                 if isinstance(raw_visual, dict):
