@@ -192,7 +192,14 @@ async def startup_event():
     print("NIMA AI BRAIN API - Starting...")
     print("=" * 60)
     print("System Prompt: Will load on first use (lazy loading)")
-    print(f"Quality Engine: {'Enabled' if QUALITY_ENGINE_ENABLED else 'Disabled'}")
+    
+    # Safely check QUALITY_ENGINE_ENABLED (may not be defined yet)
+    try:
+        quality_enabled = QUALITY_ENGINE_ENABLED
+    except NameError:
+        quality_enabled = False
+    
+    print(f"Quality Engine: {'Enabled' if quality_enabled else 'Disabled'}")
     print("VisualTrust: Using OpenCV + local extractor (no TensorFlow)")
     print("=" * 60)
     
