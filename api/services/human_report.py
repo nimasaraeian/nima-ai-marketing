@@ -1,8 +1,10 @@
 """
 Generate human-readable report from analysis JSON using OpenAI.
+ENGLISH ONLY - All output must be in English. Persian/Farsi is forbidden.
 """
 import os
 import json
+import re
 from pathlib import Path
 from typing import Dict, Any
 from dotenv import load_dotenv
@@ -22,58 +24,92 @@ else:
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 
-PROMPT_FA = """تو یک Conversion & Decision UX Auditor هستی.
-
-از عدد، نمره، درصد، confidence و واژه‌های فنی بی‌مصرف استفاده نکن.
-
-فقط مشکل‌های قابل اقدام. اگر شواهد کافی نیست، صادقانه بگو «شواهد کافی نیست».
-
-خروجی باید شامل: 3 مشکل اصلی + 5 Quick Wins + پیشنهاد متن (Headline/CTA) + چک‌لیست اجرا.
-"""
+# Persian/Farsi Unicode range: \u0600-\u06FF
+PERSIAN_UNICODE_RANGE = re.compile(r'[\u0600-\u06FF]')
 
 PROMPT_EN = """You are a Conversion & Decision UX Auditor.
+
+CRITICAL LANGUAGE RULE: You MUST write ONLY in English. Persian, Farsi, Arabic, or any non-English language is FORBIDDEN.
 
 Do not use numbers, scores, percentages, confidence, or unnecessary technical jargon.
 
 Only actionable problems. If there is insufficient evidence, honestly say "insufficient evidence".
 
 Output must include: 3 main issues + 5 Quick Wins + suggested copy (Headline/CTA) + implementation checklist.
+
+ALL OUTPUT MUST BE IN ENGLISH. Any non-English characters (especially Persian/Farsi Unicode range \\u0600-\\u06FF) will cause the system to fail.
 """
+
+
+def contains_persian(text: str) -> bool:
+    """
+    Detect if text contains Persian/Farsi characters (Unicode range \\u0600-\\u06FF).
+    
+    Args:
+        text: Text to check
+        
+    Returns:
+        True if Persian characters are detected, False otherwise
+    """
+    if not text:
+        return False
+    return bool(PERSIAN_UNICODE_RANGE.search(text))
+
+
+def validate_english_only(text: str) -> tuple[bool, str]:
+    """
+    Validate that text contains only English characters (no Persian/Farsi).
+    
+    Args:
+        text: Text to validate
+        
+    Returns:
+        Tuple of (is_valid, error_message)
+        is_valid: True if text is English-only, False if Persian detected
+        error_message: Error description if validation fails
+    """
+    if not text:
+        return True, ""
+    
+    if contains_persian(text):
+        # Find the first Persian character for debugging
+        match = PERSIAN_UNICODE_RANGE.search(text)
+        pos = match.start() if match else 0
+        context = text[max(0, pos-20):pos+20]
+        return False, f"Persian/Farsi characters detected at position {pos}. Context: {repr(context)}"
+    
+    return True, ""
 
 
 async def render_human_report(analysis_json: Dict[str, Any], locale: str = "en") -> str:
     """
     Generate human-readable report from analysis JSON.
     
+    CRITICAL: Output is ALWAYS in English, regardless of locale parameter.
+    Any Persian/Farsi characters in output will cause a RuntimeError.
+    
     Args:
         analysis_json: Complete analysis JSON with findings
-        locale: Language locale (fa, en, tr). Default: en (English)
+        locale: Ignored - output is always English
         
     Returns:
-        Human-readable report text
+        Human-readable report text in English only
         
     Raises:
-        RuntimeError: If OpenAI API key is not available
+        RuntimeError: If OpenAI API key is not available, or if output contains Persian characters
     """
     # Check if API key is available
     if not OPENAI_API_KEY:
         raise RuntimeError("LLM_UNAVAILABLE")
     
-    # Determine language and prompt
-    is_persian = locale and locale.lower() == "fa"
-    prompt = PROMPT_FA if is_persian else PROMPT_EN
-    language_name = "فارسی" if is_persian else "English"
-    language_instruction = "گزارش را به فارسی بنویس و از اعداد و درصدها استفاده نکن." if is_persian else "Write the report in English and do not use numbers or percentages."
-    error_message = "گزارش تولید نشد." if is_persian else "Report generation failed."
-    
+    # ALWAYS use English - ignore locale parameter
     # Use OpenAI SDK
     try:
         from openai import AsyncOpenAI
         
         client = AsyncOpenAI(api_key=OPENAI_API_KEY)
         
-        user_prompt = f"""Language: {language_name}
-Page Goal: {analysis_json.get("input", {}).get("goal")}
+        user_prompt = f"""Page Goal: {analysis_json.get("input", {}).get("goal")}
 URL: {analysis_json.get("input", {}).get("url")}
 
 JSON:
@@ -81,16 +117,16 @@ JSON:
 {json.dumps(analysis_json, ensure_ascii=False, indent=2)}
 ```
 
-{prompt}
+{PROMPT_EN}
 
-{language_instruction}"""
+Write the report in English. Do not use numbers or percentages. Any non-English output will be rejected."""
         
         response = await client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {
                     "role": "system",
-                    "content": prompt
+                    "content": PROMPT_EN
                 },
                 {
                     "role": "user",
@@ -101,9 +137,19 @@ JSON:
             max_tokens=2000
         )
         
-        return response.choices[0].message.content or error_message
+        report_text = response.choices[0].message.content or "Report generation failed."
         
+        # CRITICAL: Validate output is English-only
+        is_valid, error_msg = validate_english_only(report_text)
+        if not is_valid:
+            # This is a blocking error - Persian output is forbidden
+            raise RuntimeError(f"ENGLISH_ONLY_VIOLATION: Generated report contains Persian/Farsi characters. {error_msg}")
+        
+        return report_text
+        
+    except RuntimeError:
+        # Re-raise RuntimeError as-is (including our validation errors)
+        raise
     except Exception as e:
         # Re-raise the exception to be handled by the route
         raise RuntimeError(f"LLM_ERROR: {str(e)}") from e
-

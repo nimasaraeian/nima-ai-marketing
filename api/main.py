@@ -1475,6 +1475,64 @@ def debug_artifacts_exists(name: str):
     return {"path": str(p), "exists": p.exists(), "size": (p.stat().st_size if p.exists() else None)}
 
 
+@app.get("/api/_test/english-only")
+async def test_english_only():
+    """
+    Test endpoint to verify English-only output enforcement.
+    
+    Returns a sample report and validates it contains no Persian characters.
+    This test MUST fail if any non-English characters are present.
+    """
+    from api.services.human_report import render_human_report, validate_english_only, contains_persian
+    
+    # Create a minimal test analysis JSON
+    test_analysis = {
+        "input": {
+            "url": "https://example.com",
+            "goal": "leads"
+        },
+        "findings": {
+            "top_issues": [
+                {"title": "Missing trust signals", "description": "No testimonials visible"}
+            ],
+            "quick_wins": [
+                {"title": "Add social proof", "description": "Include customer testimonials"}
+            ]
+        }
+    }
+    
+    try:
+        # Generate report
+        report = await render_human_report(test_analysis, locale="en")
+        
+        # Validate English-only
+        is_valid, error_msg = validate_english_only(report)
+        has_persian = contains_persian(report)
+        
+        if not is_valid or has_persian:
+            return {
+                "status": "FAILED",
+                "error": "English-only validation failed",
+                "details": error_msg,
+                "report_preview": report[:200] if report else "No report generated",
+                "contains_persian": has_persian
+            }
+        
+        return {
+            "status": "PASSED",
+            "message": "English-only validation passed",
+            "report_length": len(report),
+            "report_preview": report[:200],
+            "contains_persian": False
+        }
+    except Exception as e:
+        return {
+            "status": "ERROR",
+            "error": str(e),
+            "type": type(e).__name__
+        }
+
+
 @app.get("/debug/env")
 def debug_env():
     """

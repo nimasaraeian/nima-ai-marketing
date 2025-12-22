@@ -274,7 +274,7 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
                 status_code=503,
                 detail={
                     "type": "LLM_UNAVAILABLE",
-                    "message": "تحلیل زبانی در حال حاضر در دسترس نیست. لطفاً چند دقیقه بعد دوباره تلاش کنید."
+                    "message": "Language analysis is currently unavailable. Please try again in a few minutes."
                 }
             )
         # Re-raise other RuntimeErrors

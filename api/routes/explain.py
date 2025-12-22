@@ -139,7 +139,8 @@ def _build_explanation_prompt(
         "ux": "UX designer, user experience focused, design-oriented"
     }.get(audience, "marketer")
     
-    lang_instruction = "Persian (Farsi)" if language == "fa" else "English"
+    # Always use English - language parameter is ignored for output
+    lang_instruction = "English"
     
     prompt = f"""You are an expert conversion optimization consultant explaining a decision diagnosis analysis.
 
