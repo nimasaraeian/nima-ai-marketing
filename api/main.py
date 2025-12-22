@@ -1371,39 +1371,6 @@ def build_info():
     }
 
 
-@app.get("/api/artifacts/{filename}")
-async def get_artifact(filename: str):
-    """Serve screenshot files from artifacts directory."""
-    from pathlib import Path
-    
-    # Get artifacts directory
-    project_root = Path(__file__).parent.parent
-    artifacts_dir = project_root / "api" / "artifacts"
-    artifact_path = artifacts_dir / filename
-    
-    # Security: ensure file is within artifacts directory
-    try:
-        artifact_path.resolve().relative_to(artifacts_dir.resolve())
-    except ValueError:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    if not artifact_path.exists():
-        raise HTTPException(status_code=404, detail="File not found")
-    
-    # Determine content type based on file extension
-    content_type = "image/png"
-    if filename.endswith(".jpg") or filename.endswith(".jpeg"):
-        content_type = "image/jpeg"
-    elif filename.endswith(".png"):
-        content_type = "image/png"
-    
-    return FileResponse(
-        path=str(artifact_path),
-        media_type=content_type,
-        filename=filename
-    )
-
-
 @app.get("/api/_health/artifacts")
 def artifacts_health():
     """Health check endpoint for artifacts directory."""
