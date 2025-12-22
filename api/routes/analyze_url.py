@@ -493,8 +493,8 @@ async def analyze_url(
         "extractedText": extracted_text,
         "screenshots": {
             "desktop": {
-                "path": debug_path.split("\\")[-1] if debug_path else None,  # Just filename
-                "url": f"/api/screenshots/{debug_path.split('\\')[-1]}" if debug_path else None,
+                "path": Path(debug_path).name if debug_path else None,  # Just filename
+                "url": f"/api/screenshots/{Path(debug_path).name}" if debug_path else None,
                 "bytes": len(shot),
                 "error": screenshot_error
             } if shot else {
@@ -504,8 +504,8 @@ async def analyze_url(
                 "error": screenshot_error
             },
             "mobile": {
-                "path": debug_path_mobile.split("\\")[-1] if debug_path_mobile else None,  # Just filename
-                "url": f"/api/screenshots/{debug_path_mobile.split('\\')[-1]}" if debug_path_mobile else None,
+                "path": Path(debug_path_mobile).name if debug_path_mobile else None,  # Just filename
+                "url": f"/api/screenshots/{Path(debug_path_mobile).name}" if debug_path_mobile else None,
                 "bytes": len(shot_mobile),
                 "error": screenshot_mobile_error
             } if shot_mobile else {
