@@ -128,15 +128,58 @@ async def render_human_report(analysis_json: Dict[str, Any], locale: str = "en")
         
         client = AsyncOpenAI(api_key=OPENAI_API_KEY)
         
+        # Extract key elements for context
+        page_map = analysis_json.get("page_map", {})
+        headlines = page_map.get("headlines", []) if isinstance(page_map, dict) else []
+        ctas = page_map.get("ctas", []) if isinstance(page_map, dict) else []
+        capture = analysis_json.get("capture", {})
+        viewport = capture.get("viewport", {}) if isinstance(capture, dict) else {}
+        
+        # Find H1
+        h1_text = None
+        for h in headlines:
+            if isinstance(h, dict) and h.get("tag") == "h1":
+                h1_text = h.get("text", "")
+                break
+        
+        # Get top 2 CTAs
+        top_ctas = []
+        for cta in ctas[:2]:
+            if isinstance(cta, dict):
+                label = cta.get("label", "") or cta.get("text", "")
+                if label:
+                    top_ctas.append(label)
+        
+        # Build context section
+        context_lines = []
+        if h1_text:
+            context_lines.append(f"Detected H1: \"{h1_text}\"")
+        if top_ctas:
+            for i, cta_label in enumerate(top_ctas, 1):
+                context_lines.append(f"Top CTA #{i}: \"{cta_label}\"")
+        if viewport:
+            viewport_height = viewport.get("height", 900) if isinstance(viewport, dict) else 900
+            context_lines.append(f"Viewport: {viewport.get('width', 'unknown')}x{viewport_height} (fold is approximately at {viewport_height}px)")
+        
+        context_section = "\n".join(context_lines) if context_lines else "No specific elements detected."
+        
         user_prompt = f"""Page Goal: {analysis_json.get("input", {}).get("goal")}
 URL: {analysis_json.get("input", {}).get("url")}
 
-JSON:
+DETECTED PAGE ELEMENTS:
+{context_section}
+
+FULL ANALYSIS DATA:
 ```json
 {json.dumps(analysis_json, ensure_ascii=False, indent=2)}
 ```
 
 {PROMPT_EN}
+
+CRITICAL: 
+- Quote the H1 and top 2 CTAs exactly as shown above
+- Specify Above-the-Fold vs Below-the-Fold for each issue
+- Make recommendations specific to the actual elements found (not generic advice)
 
 Write the report in English. Do not use numbers or percentages. Any non-English output will be rejected."""
         
