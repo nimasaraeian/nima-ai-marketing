@@ -28,6 +28,24 @@ Goal = Literal["leads", "sales", "booking", "contact", "subscribe", "other"]
 Locale = Literal["fa", "en", "tr"]
 
 
+def public_artifact_url(request: FastAPIRequest, abs_path: str | None) -> str | None:
+    """
+    Convert internal absolute path to public artifact URL.
+    
+    Args:
+        request: FastAPI Request object
+        abs_path: Absolute path to artifact file (e.g., /app/api/artifacts/screenshot.png)
+    
+    Returns:
+        Public URL (e.g., "https://domain.com/api/artifacts/screenshot.png") or None
+    """
+    if not abs_path:
+        return None
+    filename = Path(abs_path).name
+    base = str(request.base_url).rstrip("/")
+    return f"{base}/api/artifacts/{filename}"
+
+
 class AnalyzeUrlHumanRequest(BaseModel):
     """Request model for human URL analysis."""
     url: str
@@ -65,11 +83,17 @@ async def analyze_url_human_simple(payload: AnalyzeUrlHumanRequest) -> Dict[str,
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/api/analyze/url-human/test-capture")
-async def test_capture_only(payload: AnalyzeUrlHumanRequest) -> Dict[str, Any]:
+async def test_capture_only(payload: AnalyzeUrlHumanRequest, request: FastAPIRequest) -> Dict[str, Any]:
     """Test only the capture step."""
     try:
         print(f"[test_capture] Starting capture for: {payload.url}")
         capture = await capture_page_artifacts(str(payload.url))
+        
+        # Get screenshot paths from capture
+        screenshots_raw = capture.get("screenshots", {})
+        atf_path = screenshots_raw.get("above_the_fold")
+        full_path = screenshots_raw.get("full_page")
+        
         return {
             "status": "ok",
             "url": payload.url,
@@ -77,7 +101,10 @@ async def test_capture_only(payload: AnalyzeUrlHumanRequest) -> Dict[str, Any]:
                 "timestamp": capture.get("timestamp_utc"),
                 "title": capture.get("dom", {}).get("title"),
                 "html_length": len(capture.get("dom", {}).get("html_excerpt", "")),
-                "screenshots": capture.get("screenshots", {})
+                "screenshots": {
+                    "above_the_fold": public_artifact_url(request, atf_path),
+                    "full_page": public_artifact_url(request, full_path)
+                }
             }
         }
     except Exception as e:
