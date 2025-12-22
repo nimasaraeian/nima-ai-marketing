@@ -17,11 +17,8 @@ logger = logging.getLogger(__name__)
 # Note: Event loop policy should be set in main.py before FastAPI starts
 # We can't change it here as the loop is already running
 
-# Use the same ARTIFACTS_DIR as defined in api/main.py
-# This ensures screenshots are saved to the same directory that is mounted as StaticFiles
-# Get API directory (same logic as api/main.py - MUST use resolve() for consistency)
-API_DIR = Path(__file__).resolve().parent.parent  # api/services -> api/
-ARTIFACT_DIR = API_DIR / "artifacts"
+# Use centralized paths from api.paths
+from api.paths import ARTIFACTS_DIR
 
 
 def _utc_now():
@@ -99,17 +96,17 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
     Returns:
         Dictionary with screenshots paths, DOM content, and metadata
     """
-    # Ensure directory exists
-    ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
+    # Ensure directory exists (already done in api.paths, but ensure anyway)
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     
     ts = int(time.time())
     # Only store filename, not full path
     atf_filename = f"atf_{ts}.png"
     full_filename = f"full_{ts}.png"
     
-    # Full paths for saving
-    atf_path = str(ARTIFACT_DIR / atf_filename)
-    full_path = str(ARTIFACT_DIR / full_filename)
+    # Full paths for saving - use Path objects
+    out_atf = ARTIFACTS_DIR / atf_filename
+    out_full = ARTIFACTS_DIR / full_filename
     
     viewport = {"width": 1440, "height": 900}
     
@@ -119,8 +116,14 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
         html, title, readable = await loop.run_in_executor(
             None,  # Use default executor (ThreadPoolExecutor)
             _capture_sync,
-            url, atf_path, full_path, viewport
+            url, str(out_atf), str(out_full), viewport
         )
+        
+        # Assert files were saved (fail fast)
+        if not out_atf.exists():
+            raise RuntimeError(f"Artifact not saved: {out_atf}")
+        if not out_full.exists():
+            raise RuntimeError(f"Artifact not saved: {out_full}")
     except Exception as e:
         # Log exception with full traceback
         logger.exception(f"Playwright error while capturing {url}: {type(e).__name__}: {str(e)}")

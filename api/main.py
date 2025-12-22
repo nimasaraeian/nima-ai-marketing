@@ -198,17 +198,8 @@ app = FastAPI(title="Nima AI Brain API", version="1.0.0")
 
 # IMMEDIATELY after app creation: Set up static file mounts
 # This ensures mounts are registered before any routers
-from pathlib import Path
 from fastapi.staticfiles import StaticFiles
-
-# Define standard paths
-API_DIR = Path(__file__).resolve().parent
-ARTIFACTS_DIR = API_DIR / "artifacts"
-DEBUG_SHOTS_DIR = API_DIR / "debug_shots"
-
-# Ensure directories exist
-ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
-DEBUG_SHOTS_DIR.mkdir(parents=True, exist_ok=True)
+from api.paths import ARTIFACTS_DIR, DEBUG_SHOTS_DIR
 
 # Mount static file directories
 # IMPORTANT: Mounts MUST be defined BEFORE include_router calls to avoid route conflicts
