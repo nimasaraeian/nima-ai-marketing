@@ -827,7 +827,7 @@ def _safe_visual_trust_analysis(
             buffer.write(image_bytes)
 
         if VISUAL_TRUST_AVAILABLE and analyze_visual_trust_from_path:
-        vt = analyze_visual_trust_from_path(str(tmp_path))
+            vt = analyze_visual_trust_from_path(str(tmp_path))
         else:
             vt = {"trust_label": "unknown", "trust_scores": {}, "trust_score_numeric": 0.0}
         trust_scores = vt.get("trust_scores") or {}
