@@ -268,13 +268,23 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         # Re-raise HTTP exceptions as-is
         raise
     except RuntimeError as e:
+        error_str = str(e)
         # Handle LLM unavailability
-        if str(e) == "LLM_UNAVAILABLE":
+        if error_str == "LLM_UNAVAILABLE":
             raise HTTPException(
                 status_code=503,
                 detail={
                     "type": "LLM_UNAVAILABLE",
                     "message": "Language analysis is currently unavailable. Please try again in a few minutes."
+                }
+            )
+        # Handle English-only violation (blocking error)
+        if "ENGLISH_ONLY_VIOLATION" in error_str:
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "type": "ENGLISH_ONLY_VIOLATION",
+                    "message": "Report generation failed: Output contained non-English characters. This is a system error."
                 }
             )
         # Re-raise other RuntimeErrors
