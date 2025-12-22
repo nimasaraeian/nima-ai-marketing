@@ -1262,7 +1262,15 @@ def chat(request: ChatRequest):
 
 @app.get("/health")
 def health():
-    """Health check endpoint for deployment monitoring - must respond within 2 seconds"""
+    """
+    Health check endpoint for deployment monitoring.
+    
+    MUST respond quickly (< 2 seconds) and never fail.
+    Railway uses this to verify the service is running.
+    
+    Returns:
+        Simple JSON response with status
+    """
     return {"status": "ok"}
 
 
