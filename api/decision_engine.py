@@ -20,7 +20,7 @@ from dotenv import load_dotenv
 from pathlib import Path
 from urllib.parse import urlparse
 from openai import OpenAI
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, Request
 import httpx
 from bs4 import BeautifulSoup
 import asyncio
@@ -1770,7 +1770,7 @@ def _extract_content_from_html(html: str, max_chars: int = 6000) -> str:
 
 
 @router.post("/decision-engine/report-from-url")
-async def decision_engine_report_from_url(payload: ReportFromUrlInput):
+async def decision_engine_report_from_url(payload: ReportFromUrlInput, request: Request = None):
     """
     Generate decision engine report from URL.
     
@@ -1785,6 +1785,10 @@ async def decision_engine_report_from_url(payload: ReportFromUrlInput):
     """
     url = payload.url.strip()
     timeout_sec = payload.timeoutSec or 45
+    
+    # Store request for use in screenshot URL building
+    if request:
+        decision_engine_report_from_url._current_request = request
     
     # Validate URL
     if not url or not isinstance(url, str):
@@ -1858,34 +1862,67 @@ async def decision_engine_report_from_url(payload: ReportFromUrlInput):
             "errorMessage": f"Failed to extract content: {str(e)[:200]}"
         }
     
-    # Step 3: Capture screenshot (using internal function, not HTTP)
+    # Step 3: Capture screenshots (desktop and mobile) and save to disk
     screenshot_bytes = None
+    desktop_filename = None
+    mobile_filename = None
+    
+    # Capture desktop screenshot
     try:
-        from api.services.screenshot import capture_url_png_bytes
-        screenshot_bytes = await asyncio.to_thread(capture_url_png_bytes, url)
+        from api.services.screenshot import capture_and_save_screenshot
+        screenshot_bytes, desktop_filename = await asyncio.to_thread(
+            capture_and_save_screenshot, url, "desktop"
+        )
+        logger.info(f"Desktop screenshot saved: {desktop_filename}")
     except Exception as e:
-        logger.warning(f"Failed to capture screenshot (continuing without visual analysis): {e}")
-        # Continue without screenshot - we can still generate text-based report
+        logger.warning(f"Failed to capture desktop screenshot: {e}")
+        desktop_filename = None
+    
+    # Capture mobile screenshot
+    try:
+        _, mobile_filename = await asyncio.to_thread(
+            capture_and_save_screenshot, url, "mobile"
+        )
+        logger.info(f"Mobile screenshot saved: {mobile_filename}")
+    except Exception as e:
+        logger.warning(f"Failed to capture mobile screenshot: {e}")
+        mobile_filename = None
     
     # Step 4: Run visual trust analysis (using internal function, not HTTP)
+    # MUST BE FAIL-SAFE: Never allow VisualTrust to break the pipeline
     visual_trust_result = None
     if screenshot_bytes:
         try:
             from api.visual_trust_engine import run_visual_trust_from_bytes
             visual_trust_result = run_visual_trust_from_bytes(screenshot_bytes)
+            
+            # Safety check: ensure result is a dict and has required fields
+            if visual_trust_result is None:
+                raise ValueError("VisualTrust returned None")
+            if not isinstance(visual_trust_result, dict):
+                raise ValueError(f"VisualTrust returned non-dict: {type(visual_trust_result)}")
+            
+            # Ensure required fields exist
+            if "analysisStatus" not in visual_trust_result:
+                visual_trust_result["analysisStatus"] = "ok"
+            if "label" not in visual_trust_result:
+                visual_trust_result["label"] = "Unknown"
+                
         except Exception as e:
-            logger.warning(f"Failed to analyze visual trust (continuing without visual analysis): {e}")
-            # Continue without visual trust - we can still generate text-based report
+            logger.warning(f"VisualTrust analysis failed (fail-safe fallback): {e}")
+            # FAIL-SAFE: Return safe dict, never raise
             visual_trust_result = {
-                "analysisStatus": "skipped",
+                "analysisStatus": "fallback",
                 "label": "Unknown",
-                "error": f"Visual analysis unavailable: {str(e)[:100]}"
+                "error": f"Visual analysis unavailable: {str(e)[:100]}",
+                "debugBuild": "VT_FALLBACK_SAFE"
             }
     else:
         visual_trust_result = {
             "analysisStatus": "skipped",
             "label": "Unknown",
-            "error": "Screenshot capture failed, visual analysis skipped"
+            "error": "Screenshot capture failed, visual analysis skipped",
+            "debugBuild": "VT_NO_SCREENSHOT"
         }
     
     # Step 5: Build payload and call decision engine report internally
@@ -1918,6 +1955,38 @@ async def decision_engine_report_from_url(payload: ReportFromUrlInput):
             # If formatter fails, use raw output
             report_text = json.dumps(decision_output, indent=2)
         
+        # Build screenshot URLs
+        base_url = ""
+        if request:
+            base_url = str(request.base_url).rstrip("/")
+        else:
+            # Fallback: try to get from environment
+            import os
+            railway_url = os.getenv("RAILWAY_PUBLIC_DOMAIN")
+            if railway_url:
+                base_url = f"https://{railway_url}"
+        
+        def make_shot_obj(kind: str, filename: str | None, viewport: list) -> dict:
+            """Helper to create screenshot object for response."""
+            if not filename:
+                return {
+                    "status": "error",
+                    "mode": kind,
+                    "viewport": viewport,
+                    "path": None,
+                    "url": None,
+                    "error": "no_file"
+                }
+            url_path = f"{base_url}/api/debug_shots/{filename}" if base_url else f"/api/debug_shots/{filename}"
+            return {
+                "status": "ok",
+                "mode": kind,
+                "viewport": viewport,
+                "path": f"api/debug_shots/{filename}",
+                "url": url_path,
+                "error": ""
+            }
+        
         # Ensure report is always included in response
         response = {
             "analysisStatus": "ok",
@@ -1930,6 +1999,10 @@ async def decision_engine_report_from_url(payload: ReportFromUrlInput):
                 "report": report_text,
                 "raw_analysis": decision_output,
                 "format": "markdown"
+            },
+            "screenshots": {
+                "desktop": make_shot_obj("desktop", desktop_filename, [1366, 768]),
+                "mobile": make_shot_obj("mobile", mobile_filename, [390, 844])
             }
         }
         

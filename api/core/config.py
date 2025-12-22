@@ -109,6 +109,39 @@ def get_main_brain_backend_url() -> str:
     return url.rstrip("/")
 
 
+def get_debug_shots_dir() -> Path:
+    """
+    Get the directory path for debug screenshots.
+    
+    Uses SCREENSHOT_DEBUG_DIR env var if set, otherwise defaults to api/debug_shots.
+    Always resolves to absolute path and ensures directory exists.
+    
+    Returns:
+        Path object pointing to debug_shots directory
+    """
+    # Get API directory (where this config module is located: api/core/config.py)
+    api_dir = Path(__file__).resolve().parent.parent  # api/
+    
+    # Check for custom path from env
+    custom_path = get_env("SCREENSHOT_DEBUG_DIR")
+    if custom_path:
+        # If absolute path provided, use it directly
+        if Path(custom_path).is_absolute():
+            debug_dir = Path(custom_path).resolve()
+        else:
+            # Relative path: resolve from project root
+            project_root = api_dir.parent
+            debug_dir = (project_root / custom_path).resolve()
+    else:
+        # Default: api/debug_shots
+        debug_dir = (api_dir / "debug_shots").resolve()
+    
+    # Ensure directory exists
+    debug_dir.mkdir(parents=True, exist_ok=True)
+    
+    return debug_dir
+
+
 def get_debug_env_info() -> dict:
     """
     Get environment variable info for debugging (local dev only).
@@ -124,5 +157,7 @@ def get_debug_env_info() -> dict:
         "BRAIN_BACKEND_URL": get_env("BRAIN_BACKEND_URL") or "(not set)",
         "is_local_dev": is_local_dev(),
         "computed_backend_url": get_main_brain_backend_url() if is_local_dev() else "(production - not shown)",
+        "SCREENSHOT_DEBUG_DIR": get_env("SCREENSHOT_DEBUG_DIR") or "(not set - using default: api/debug_shots)",
+        "debug_shots_path": str(get_debug_shots_dir()),
     }
 

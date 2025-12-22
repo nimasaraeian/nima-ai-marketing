@@ -833,8 +833,8 @@ def extract_visual_elements(image_bytes: bytes, debug: bool = False) -> Dict:
             _draw_box(overlay, box, color, caption)
 
         try:
-            debug_dir = Path(__file__).parent.parent / "debug_shots"
-            debug_dir.mkdir(exist_ok=True)
+            from api.core.config import get_debug_shots_dir
+            debug_dir = get_debug_shots_dir()  # Use shared config
             ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S_%f")
             overlay_path = debug_dir / f"overlay_{ts}.png"
             written = cv2.imwrite(str(overlay_path), overlay)

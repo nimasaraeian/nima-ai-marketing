@@ -248,8 +248,8 @@ async def analyze_url(
         logger.info(f"Desktop screenshot captured successfully: {len(shot)} bytes")
         
         # Save desktop screenshot
-        debug_dir = Path(__file__).parent.parent / "debug_shots"
-        debug_dir.mkdir(exist_ok=True)
+        from api.core.config import get_debug_shots_dir
+        debug_dir = get_debug_shots_dir()  # Use shared config
         ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         debug_file = debug_dir / f"desktop_{ts}.png"
         debug_file.write_bytes(shot)
@@ -281,8 +281,8 @@ async def analyze_url(
         logger.info(f"Mobile screenshot captured successfully: {len(shot_mobile)} bytes")
         
         # Save mobile screenshot
-        debug_dir = Path(__file__).parent.parent / "debug_shots"
-        debug_dir.mkdir(exist_ok=True)
+        from api.core.config import get_debug_shots_dir
+        debug_dir = get_debug_shots_dir()  # Use shared config
         ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
         debug_file_mobile = debug_dir / f"mobile_{ts}.png"
         debug_file_mobile.write_bytes(shot_mobile)

@@ -157,12 +157,16 @@ def load_psychology_finetune_model_id() -> str:
 # Initialize FastAPI app
 app = FastAPI(title="Nima AI Brain API", version="1.0.0")
 
+# Canonical uvicorn command (for documentation):
+# uvicorn api.main:app --host 0.0.0.0 --port $PORT
+
 # Mount static files for debug_shots directory
-BASE_DIR = Path(__file__).resolve().parent  # api/ directory
-DEBUG_SHOTS_DIR = (BASE_DIR / "debug_shots").resolve()
-DEBUG_SHOTS_DIR.mkdir(parents=True, exist_ok=True)
+# Use shared config to ensure consistency across all screenshot generation code
+from api.core.config import get_debug_shots_dir
+DEBUG_SHOTS_DIR = get_debug_shots_dir()
 
 # Mount the debug_shots directory as static files
+# IMPORTANT: Mount must be defined BEFORE include_router calls to avoid route conflicts
 app.mount("/api/debug_shots", StaticFiles(directory=str(DEBUG_SHOTS_DIR)), name="debug_shots")
 
 # Startup event: Log environment configuration (non-blocking)
@@ -1288,10 +1292,24 @@ async def get_artifact(filename: str):
 @app.get("/api/debug_shots/_health")
 def debug_shots_health():
     """Health check endpoint for debug_shots directory."""
+    sample_files = []
+    if DEBUG_SHOTS_DIR.exists():
+        try:
+            # Get 5 most recent PNG files
+            png_files = sorted(
+                DEBUG_SHOTS_DIR.glob("*.png"),
+                key=lambda x: x.stat().st_mtime,
+                reverse=True
+            )[:5]
+            sample_files = [p.name for p in png_files]
+        except Exception:
+            pass
+    
     return {
         "exists": DEBUG_SHOTS_DIR.exists(),
+        "is_dir": DEBUG_SHOTS_DIR.is_dir() if DEBUG_SHOTS_DIR.exists() else False,
         "path": str(DEBUG_SHOTS_DIR),
-        "is_dir": DEBUG_SHOTS_DIR.is_dir() if DEBUG_SHOTS_DIR.exists() else False
+        "sample_files": sample_files
     }
 
 
