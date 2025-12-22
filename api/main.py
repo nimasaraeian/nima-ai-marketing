@@ -201,11 +201,10 @@ app = FastAPI(title="Nima AI Brain API", version="1.0.0")
 from pathlib import Path
 from fastapi.staticfiles import StaticFiles
 
-# Define standard paths - use shared config for consistency
-from api.core.config import get_artifacts_dir, get_debug_shots_dir
-API_DIR = Path(__file__).resolve().parent  # /app/api in container, api/ locally
-ARTIFACTS_DIR = get_artifacts_dir()  # Uses shared config
-DEBUG_SHOTS_DIR = get_debug_shots_dir()  # Uses shared config
+# Define standard paths
+API_DIR = Path(__file__).resolve().parent
+ARTIFACTS_DIR = API_DIR / "artifacts"
+DEBUG_SHOTS_DIR = API_DIR / "debug_shots"
 
 # Ensure directories exist
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)

@@ -203,6 +203,15 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         
         print("[analyze_url_human] ✅ Analysis completed successfully")
         
+        # Screenshots now return only filenames, build URLs from filenames
+        screenshots_raw = capture.get("screenshots", {})
+        atf_filename = screenshots_raw.get("above_the_fold")
+        full_filename = screenshots_raw.get("full_page")
+        
+        base_url = str(request.base_url).rstrip("/")
+        atf_url = f"{base_url}/api/artifacts/{atf_filename}" if atf_filename else None
+        full_url = f"{base_url}/api/artifacts/{full_filename}" if full_filename else None
+        
         # Limit response size - don't send full HTML/capture data
         response_data = {
             "analysisStatus": "ok",
@@ -217,13 +226,11 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
                 "quick_wins_count": len(findings.get("findings", {}).get("quick_wins", [])),
             },
             "findings": findings.get("findings", {}),
-            # Include minimal capture info (not full HTML)
-            # Convert absolute paths to public URLs
             "capture_info": {
                 "timestamp": capture.get("timestamp_utc"),
                 "screenshots": {
-                    "above_the_fold": _public_file_url(request, capture.get("screenshots", {}).get("above_the_fold"), "/api/artifacts"),
-                    "full_page": _public_file_url(request, capture.get("screenshots", {}).get("full_page"), "/api/artifacts"),
+                    "above_the_fold": atf_url,
+                    "full_page": full_url,
                 },
                 "title": capture.get("dom", {}).get("title"),
             },
@@ -234,9 +241,10 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
             },
             # Add public screenshots URLs at root level for easy access
             "screenshots": {
-                "above_the_fold": _public_file_url(request, capture.get("screenshots", {}).get("above_the_fold"), "/api/artifacts"),
-                "full_page": _public_file_url(request, capture.get("screenshots", {}).get("full_page"), "/api/artifacts"),
+                "above_the_fold": atf_url,
+                "full_page": full_url,
             }
+        }
         }
         
         return response_data

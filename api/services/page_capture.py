@@ -19,8 +19,9 @@ logger = logging.getLogger(__name__)
 
 # Use the same ARTIFACTS_DIR as defined in api/main.py
 # This ensures screenshots are saved to the same directory that is mounted as StaticFiles
-from api.core.config import get_artifacts_dir
-ARTIFACT_DIR = str(get_artifacts_dir())
+# Get API directory (same logic as api/main.py)
+API_DIR = Path(__file__).parent.parent  # api/services -> api/
+ARTIFACT_DIR = API_DIR / "artifacts"
 
 
 def _utc_now():
@@ -99,12 +100,16 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
         Dictionary with screenshots paths, DOM content, and metadata
     """
     # Ensure directory exists
-    Path(ARTIFACT_DIR).mkdir(parents=True, exist_ok=True)
+    ARTIFACT_DIR.mkdir(parents=True, exist_ok=True)
     
     ts = int(time.time())
-    # Use Path for cross-platform compatibility
-    atf_path = str(Path(ARTIFACT_DIR) / f"atf_{ts}.png")
-    full_path = str(Path(ARTIFACT_DIR) / f"full_{ts}.png")
+    # Only store filename, not full path
+    atf_filename = f"atf_{ts}.png"
+    full_filename = f"full_{ts}.png"
+    
+    # Full paths for saving
+    atf_path = str(ARTIFACT_DIR / atf_filename)
+    full_path = str(ARTIFACT_DIR / full_filename)
     
     viewport = {"width": 1440, "height": 900}
     
@@ -132,8 +137,8 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
         "timestamp_utc": _utc_now(),
         "viewport": viewport,
         "screenshots": {
-            "above_the_fold": atf_path,
-            "full_page": full_path,
+            "above_the_fold": atf_filename,  # Only filename, not full path
+            "full_page": full_filename,  # Only filename, not full path
             "sections": []
         },
         "dom": {
