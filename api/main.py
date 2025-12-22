@@ -1404,7 +1404,7 @@ async def get_artifact(filename: str):
     )
 
 
-@app.get("/api/artifacts/_health")
+@app.get("/api/_health/artifacts")
 def artifacts_health():
     """Health check endpoint for artifacts directory."""
     return {
@@ -1414,7 +1414,7 @@ def artifacts_health():
     }
 
 
-@app.get("/api/debug_shots/_health")
+@app.get("/api/_health/debug_shots")
 def debug_shots_health():
     """Health check endpoint for debug_shots directory."""
     return {
