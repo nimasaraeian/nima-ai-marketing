@@ -245,7 +245,6 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
                 "full_page": full_url,
             }
         }
-        }
         
         return response_data
         
