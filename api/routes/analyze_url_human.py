@@ -104,10 +104,18 @@ async def test_capture_only(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         print(f"[test_capture] Starting capture for: {payload.url}")
         capture = await capture_page_artifacts(str(payload.url))
         
-        # Get screenshot paths from capture
+        # Get screenshot filenames from capture (now returns only filenames)
         screenshots_raw = capture.get("screenshots", {})
-        atf_path = screenshots_raw.get("above_the_fold")
-        full_path = screenshots_raw.get("full_page")
+        atf_filename = screenshots_raw.get("above_the_fold")
+        full_filename = screenshots_raw.get("full_page")
+        
+        # Build URLs from filenames - use x-forwarded-proto and host for Railway compatibility
+        proto = request.headers.get("x-forwarded-proto", "http")
+        host = request.headers.get("host")
+        base_url = f"{proto}://{host}" if host else str(request.base_url).rstrip("/")
+        
+        atf_url = f"{base_url}/api/artifacts/{atf_filename}" if atf_filename else None
+        full_url = f"{base_url}/api/artifacts/{full_filename}" if full_filename else None
         
         return {
             "status": "ok",
@@ -117,8 +125,8 @@ async def test_capture_only(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
                 "title": capture.get("dom", {}).get("title"),
                 "html_length": len(capture.get("dom", {}).get("html_excerpt", "")),
                 "screenshots": {
-                    "above_the_fold": public_artifact_url(request, atf_path),
-                    "full_page": public_artifact_url(request, full_path)
+                    "above_the_fold": atf_url,
+                    "full_page": full_url
                 }
             }
         }
@@ -208,7 +216,11 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         atf_filename = screenshots_raw.get("above_the_fold")
         full_filename = screenshots_raw.get("full_page")
         
-        base_url = str(request.base_url).rstrip("/")
+        # Use x-forwarded-proto and host headers for Railway compatibility
+        proto = request.headers.get("x-forwarded-proto", "http")
+        host = request.headers.get("host")
+        base_url = f"{proto}://{host}" if host else str(request.base_url).rstrip("/")
+        
         atf_url = f"{base_url}/api/artifacts/{atf_filename}" if atf_filename else None
         full_url = f"{base_url}/api/artifacts/{full_filename}" if full_filename else None
         
