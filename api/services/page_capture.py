@@ -19,8 +19,8 @@ logger = logging.getLogger(__name__)
 
 # Use the same ARTIFACTS_DIR as defined in api/main.py
 # This ensures screenshots are saved to the same directory that is mounted as StaticFiles
-# Get API directory (same logic as api/main.py)
-API_DIR = Path(__file__).parent.parent  # api/services -> api/
+# Get API directory (same logic as api/main.py - MUST use resolve() for consistency)
+API_DIR = Path(__file__).resolve().parent.parent  # api/services -> api/
 ARTIFACT_DIR = API_DIR / "artifacts"
 
 
