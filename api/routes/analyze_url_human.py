@@ -5,7 +5,7 @@ and generates a human report via OpenAI.
 """
 import sys
 import asyncio
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Request as FastAPIRequest
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, HttpUrl, field_validator
 from typing import Optional, Literal, Dict, Any
@@ -87,7 +87,7 @@ async def test_capture_only(payload: AnalyzeUrlHumanRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=500, detail=error_detail)
 
 @router.post("/api/analyze/url-human")
-async def analyze_url_human(payload: AnalyzeUrlHumanRequest) -> Dict[str, Any]:
+async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIRequest) -> Dict[str, Any]:
     """
     Analyze a URL and generate a human-readable report.
     
@@ -180,8 +180,8 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest) -> Dict[str, Any]:
             "capture_info": {
                 "timestamp": capture.get("timestamp_utc"),
                 "screenshots": {
-                    "above_the_fold": file_url(request, "api/artifacts", capture.get("screenshots", {}).get("above_the_fold")),
-                    "full_page": file_url(request, "api/artifacts", capture.get("screenshots", {}).get("full_page")),
+                    "above_the_fold": _public_file_url(request, capture.get("screenshots", {}).get("above_the_fold"), "/api/artifacts"),
+                    "full_page": _public_file_url(request, capture.get("screenshots", {}).get("full_page"), "/api/artifacts"),
                 },
                 "title": capture.get("dom", {}).get("title"),
             },
@@ -189,6 +189,11 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest) -> Dict[str, Any]:
                 "headlines": page_map.get("headlines", []),
                 "ctas": page_map.get("ctas", []),
                 "trust_signals": page_map.get("trust_signals", []),
+            },
+            # Add public screenshots URLs at root level for easy access
+            "screenshots": {
+                "above_the_fold": _public_file_url(request, capture.get("screenshots", {}).get("above_the_fold"), "/api/artifacts"),
+                "full_page": _public_file_url(request, capture.get("screenshots", {}).get("full_page"), "/api/artifacts"),
             }
         }
         

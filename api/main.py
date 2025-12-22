@@ -175,11 +175,12 @@ app = FastAPI(title="Nima AI Brain API", version="1.0.0")
 # Use shared config to ensure consistency across all screenshot generation code
 from api.core.config import get_debug_shots_dir
 
-APP_DIR = Path(__file__).resolve().parent  # /app/api in container, api/ locally
+# Define standard paths at module level
+API_DIR = Path(__file__).resolve().parent  # /app/api in container, api/ locally
 
 # Artifacts directory (used by analyze_url_human)
-ARTIFACTS_DIR = (APP_DIR / "artifacts").resolve()
-DEBUG_SHOTS_DIR = get_debug_shots_dir()  # Uses shared config
+ARTIFACTS_DIR = (API_DIR / "artifacts").resolve()
+DEBUG_SHOTS_DIR = (API_DIR / "debug_shots").resolve()
 
 # Ensure directories exist
 ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
