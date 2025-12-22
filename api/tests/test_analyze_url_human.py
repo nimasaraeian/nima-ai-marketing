@@ -99,6 +99,78 @@ def test_analyze_url_human_error_handling():
     assert data["analysisStatus"] == "error", f"Expected analysisStatus='error' for invalid input, got '{data['analysisStatus']}'"
 
 
+def test_issues_count_matches_findings():
+    """
+    Test that issues_count matches the actual number of issues in findings.top_issues.
+    """
+    payload = {
+        "url": "https://example.com",
+        "goal": "leads",
+        "locale": "en"
+    }
+    
+    response = client.post("/api/analyze/url-human", json=payload)
+    
+    assert response.status_code == 200, f"Expected 200, got {response.status_code}"
+    
+    data = response.json()
+    assert data.get("analysisStatus") == "ok", "Analysis must succeed"
+    
+    # Get issues_count from summary
+    summary = data.get("summary", {})
+    issues_count = summary.get("issues_count", 0)
+    
+    # Get actual issues from findings
+    findings = data.get("findings", {})
+    top_issues = findings.get("top_issues", [])
+    actual_issues = len(top_issues) if isinstance(top_issues, list) else 0
+    
+    # Assert they match
+    assert issues_count == actual_issues, f"issues_count ({issues_count}) must equal len(findings.top_issues) ({actual_issues})"
+
+
+def test_issues_count_matches_human_report():
+    """
+    Test that issues_count matches the number of issues listed in human_report.
+    
+    If human_report lists N issues (numbered 1., 2., 3., etc.), issues_count must be N.
+    """
+    import re
+    
+    payload = {
+        "url": "https://example.com",
+        "goal": "leads",
+        "locale": "en"
+    }
+    
+    response = client.post("/api/analyze/url-human", json=payload)
+    
+    assert response.status_code == 200, f"Expected 200, got {response.status_code}"
+    
+    data = response.json()
+    assert data.get("analysisStatus") == "ok", "Analysis must succeed"
+    
+    # Get issues_count from summary
+    summary = data.get("summary", {})
+    issues_count = summary.get("issues_count", 0)
+    
+    # Get human_report
+    human_report = data.get("human_report", "")
+    assert isinstance(human_report, str), "human_report must be a string"
+    assert len(human_report) > 0, "human_report must be non-empty"
+    
+    # Count numbered issues in report (pattern: "1.", "2.", "3." at start of line or after markdown)
+    issue_pattern = re.compile(r'^(\d+)\.\s+\*\*', re.MULTILINE)
+    report_issues = issue_pattern.findall(human_report)
+    report_issues_count = len(report_issues) if report_issues else 0
+    
+    # Assert they match
+    assert issues_count == report_issues_count, (
+        f"issues_count ({issues_count}) must equal number of issues in human_report ({report_issues_count}). "
+        f"Report issues found: {report_issues}"
+    )
+
+
 def test_screenshot_urls_accessible():
     """
     Integration test: Verify screenshot URLs are actually accessible.

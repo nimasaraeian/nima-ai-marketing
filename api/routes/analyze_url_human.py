@@ -257,6 +257,22 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         human_report = await render_human_report(analysis_json, locale="en")
         print("[analyze_url_human] Report generated successfully")
         
+        # Count actual issues from findings
+        top_issues = findings.get("findings", {}).get("top_issues", [])
+        actual_issues_count = len(top_issues) if isinstance(top_issues, list) else 0
+        
+        # Count issues in human_report by looking for numbered issues (1., 2., 3., etc.)
+        import re
+        # Pattern to match numbered issues: "1.", "2.", "3." at start of line or after markdown header
+        issue_pattern = re.compile(r'^(\d+)\.\s+\*\*', re.MULTILINE)
+        report_issues = issue_pattern.findall(human_report)
+        report_issues_count = len(report_issues) if report_issues else 0
+        
+        # If counts don't match, log warning but use findings count (source of truth)
+        if report_issues_count != actual_issues_count:
+            logger.warning(f"[analyze_url_human] Issue count mismatch: findings={actual_issues_count}, report={report_issues_count}")
+            print(f"[analyze_url_human] ⚠️ Issue count mismatch: findings={actual_issues_count}, report={report_issues_count}")
+        
         print("[analyze_url_human] ✅ Analysis completed successfully")
         
         # Screenshots now return only filenames, build URLs from filenames
@@ -318,7 +334,7 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
                 "locale": payload.locale,
                 "headlines_count": len(page_map.get("headlines", [])),
                 "ctas_count": len(page_map.get("ctas", [])),
-                "issues_count": len(findings.get("findings", {}).get("top_issues", [])),
+                "issues_count": actual_issues_count,
                 "quick_wins_count": len(findings.get("findings", {}).get("quick_wins", [])),
             },
             "findings": findings.get("findings", {}),

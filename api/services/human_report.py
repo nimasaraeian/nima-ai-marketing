@@ -54,7 +54,9 @@ Do not use numbers, scores, percentages, confidence, or unnecessary technical ja
 
 Only actionable problems. If there is insufficient evidence, honestly say "insufficient evidence".
 
-Output must include: 3 main issues + 5 Quick Wins + suggested copy (Headline/CTA) + implementation checklist.
+Output must include: 3 main issues (numbered 1, 2, 3) + 5 Quick Wins + suggested copy (Headline/CTA) + implementation checklist.
+
+CRITICAL: The number of main issues you list MUST match the number of issues in findings.top_issues. Count the issues in the JSON data and list exactly that many (not more, not less).
 
 ALL OUTPUT MUST BE IN ENGLISH. Any non-English characters (especially Persian/Farsi Unicode range \\u0600-\\u06FF) will cause the system to fail.
 """
