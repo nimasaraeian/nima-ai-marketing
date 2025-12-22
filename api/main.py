@@ -156,28 +156,22 @@ def load_psychology_finetune_model_id() -> str:
 # Initialize FastAPI app
 app = FastAPI(title="Nima AI Brain API", version="1.0.0")
 
-# Startup event: Log environment configuration
+# Startup event: Log environment configuration (non-blocking)
 @app.on_event("startup")
 async def startup_event():
-    """Log environment configuration on startup and lazy load heavy resources."""
+    """Log environment configuration on startup - heavy resources load lazily on first use."""
     import logging
-    global SYSTEM_PROMPT
     logger = logging.getLogger("brain")
     
-    # Lazy load system prompt (moved here to prevent startup timeout)
-    try:
-        SYSTEM_PROMPT = load_brain_memory()
-        print("=" * 60)
-        print("NIMA AI BRAIN API - Starting...")
-        print("=" * 60)
-        print(f"System Prompt Length: {len(SYSTEM_PROMPT)} characters")
-        print(f"Quality Engine: {'Enabled' if QUALITY_ENGINE_ENABLED else 'Disabled'}")
-        print("VisualTrust: Using OpenCV + local extractor (no TensorFlow)")
-        print("=" * 60)
-    except Exception as e:
-        logger.exception(f"Failed to load brain memory: {e}")
-        SYSTEM_PROMPT = ""  # Fallback to empty prompt
-        print(f"⚠️  Warning: Failed to load brain memory: {e}")
+    # System prompt will be loaded lazily by chat functions when needed
+    # This prevents blocking healthchecks during startup
+    print("=" * 60)
+    print("NIMA AI BRAIN API - Starting...")
+    print("=" * 60)
+    print("System Prompt: Will load on first use (lazy loading)")
+    print(f"Quality Engine: {'Enabled' if QUALITY_ENGINE_ENABLED else 'Disabled'}")
+    print("VisualTrust: Using OpenCV + local extractor (no TensorFlow)")
+    print("=" * 60)
     
     try:
         from api.core.config import get_main_brain_backend_url, is_local_dev
