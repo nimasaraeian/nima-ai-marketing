@@ -68,7 +68,7 @@ class AnalyzeUrlHumanRequest(BaseModel):
     """Request model for human URL analysis."""
     url: str
     goal: Optional[Goal] = "other"
-    locale: Optional[Locale] = "fa"
+    locale: Optional[Locale] = "en"
     
     @field_validator('url')
     @classmethod
