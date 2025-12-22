@@ -236,7 +236,18 @@ async def startup_event():
         quality_enabled = False
     
     print(f"Quality Engine: {'Enabled' if quality_enabled else 'Disabled'}")
-    print(f"VisualTrust: {'Available' if VISUAL_TRUST_AVAILABLE else 'Not Available'} (Using OpenCV + local extractor)")
+    
+    # VisualTrust status with detailed info
+    if VISUAL_TRUST_AVAILABLE:
+        vt_status = "Available (OpenCV + local extractor)"
+    elif OPENCV_AVAILABLE and not extractor_loaded_ok:
+        vt_status = "Limited / Fallback mode (OpenCV available, extractor failed)"
+    elif not OPENCV_AVAILABLE and extractor_loaded_ok:
+        vt_status = "Limited / Fallback mode (OpenCV not available, extractor OK)"
+    else:
+        vt_status = "Limited / Fallback mode (OpenCV not available, extractor not available)"
+    
+    print(f"VisualTrust: {vt_status}")
     print("=" * 60)
     
     try:
