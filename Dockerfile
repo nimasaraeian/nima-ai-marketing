@@ -51,14 +51,11 @@ RUN python -m playwright install chromium
 
 COPY . .
 
-# Copy and make startup script executable
-COPY start.sh /app/start.sh
+# Ensure startup script is executable
 RUN chmod +x /app/start.sh
 
-# Use PORT environment variable if set, otherwise default to 8000
-ENV PORT=8000
-# EXPOSE documents the port (actual port is set via PORT env var at runtime)
+# Document port (Railway uses its own PORT env at runtime)
 EXPOSE 8000
 
-# Use startup script for better error handling
+# Start via script (handles PORT correctly)
 CMD ["/app/start.sh"]
