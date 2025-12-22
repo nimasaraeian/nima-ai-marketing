@@ -84,7 +84,7 @@ class AnalyzeUrlHumanRequest(BaseModel):
 @router.get("/api/analyze/url-human/test")
 async def test_endpoint():
     """Test endpoint to verify route is working."""
-    return {"status": "ok", "message": "Endpoint is accessible"}
+    return {"analysisStatus": "ok", "message": "Endpoint is accessible"}
 
 @router.post("/api/analyze/url-human/simple")
 async def analyze_url_human_simple(payload: AnalyzeUrlHumanRequest) -> Dict[str, Any]:
