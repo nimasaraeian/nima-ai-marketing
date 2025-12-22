@@ -1375,10 +1375,25 @@ def build_info():
 @app.get("/api/_health/artifacts")
 def artifacts_health():
     """Health check endpoint for artifacts directory."""
+    sample_files = []
+    if ARTIFACTS_DIR.exists():
+        try:
+            # Get 5 most recent PNG files
+            png_files = sorted(
+                ARTIFACTS_DIR.glob("*.png"),
+                key=lambda x: x.stat().st_mtime if x.exists() else 0,
+                reverse=True
+            )[:5]
+            sample_files = [p.name for p in png_files]
+        except Exception as e:
+            sample_files = [f"error: {str(e)}"]
+    
     return {
         "exists": ARTIFACTS_DIR.exists(),
         "is_dir": ARTIFACTS_DIR.is_dir() if ARTIFACTS_DIR.exists() else False,
-        "path": str(ARTIFACTS_DIR)
+        "path": str(ARTIFACTS_DIR),
+        "sample_files": sample_files,
+        "file_count": len(list(ARTIFACTS_DIR.glob("*.png"))) if ARTIFACTS_DIR.exists() else 0
     }
 
 
