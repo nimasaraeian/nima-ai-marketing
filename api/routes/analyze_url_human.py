@@ -29,22 +29,36 @@ Goal = Literal["leads", "sales", "booking", "contact", "subscribe", "other"]
 Locale = Literal["fa", "en", "tr"]
 
 
-def public_artifact_url(request: FastAPIRequest, abs_path: str | None) -> str | None:
+def _public_file_url(
+    request: FastAPIRequest,
+    abs_path: str | None,
+    mount_prefix: str
+) -> str | None:
     """
-    Convert internal absolute path to public artifact URL.
+    Convert internal absolute path to public file URL.
     
     Args:
         request: FastAPI Request object
-        abs_path: Absolute path to artifact file (e.g., /app/api/artifacts/screenshot.png)
+        abs_path: Absolute path to file (e.g., /app/api/artifacts/screenshot.png)
+        mount_prefix: Mount prefix (e.g., "/api/artifacts")
     
     Returns:
         Public URL (e.g., "https://domain.com/api/artifacts/screenshot.png") or None
     """
     if not abs_path:
         return None
-    filename = Path(abs_path).name
-    base = str(request.base_url).rstrip("/")
-    return f"{base}/api/artifacts/{filename}"
+    
+    p = Path(abs_path)
+    base_url = str(request.base_url).rstrip("/")
+    return f"{base_url}{mount_prefix}/{p.name}"
+
+
+def public_artifact_url(request: FastAPIRequest, abs_path: str | None) -> str | None:
+    """
+    Convert internal absolute path to public artifact URL.
+    Convenience wrapper for _public_file_url with /api/artifacts prefix.
+    """
+    return _public_file_url(request, abs_path, "/api/artifacts")
 
 
 class AnalyzeUrlHumanRequest(BaseModel):
