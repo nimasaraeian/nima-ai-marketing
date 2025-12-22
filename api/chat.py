@@ -50,16 +50,30 @@ def get_client():
         _client = OpenAI(api_key=api_key, timeout=300.0, max_retries=3)
     return _client
 
-# Load system prompt once at startup
-SYSTEM_PROMPT = load_brain_memory()
+# Lazy load system prompt (moved to function to prevent startup timeout)
+SYSTEM_PROMPT = None
+
+def get_system_prompt():
+    """Get system prompt, loading it lazily if needed"""
+    global SYSTEM_PROMPT
+    if SYSTEM_PROMPT is None:
+        try:
+            SYSTEM_PROMPT = load_brain_memory()
+        except Exception as e:
+            # Fallback to empty prompt if loading fails
+            import logging
+            logger = logging.getLogger("chat")
+            logger.exception(f"Failed to load brain memory: {e}")
+            SYSTEM_PROMPT = ""
+    return SYSTEM_PROMPT
 
 def reload_system_prompt():
     """Reload the system prompt (useful for development/testing)"""
     global SYSTEM_PROMPT
-    from brain_loader import clear_cache
+    from api.brain_loader import clear_cache
     clear_cache()
-    SYSTEM_PROMPT = load_brain_memory()
-    return SYSTEM_PROMPT
+    SYSTEM_PROMPT = None  # Reset to force reload
+    return get_system_prompt()
 
 
 def chat_completion(user_message, model="gpt-4", temperature=0.7):
@@ -77,7 +91,7 @@ def chat_completion(user_message, model="gpt-4", temperature=0.7):
     client = get_client()
     
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": get_system_prompt()},
         {"role": "user", "content": user_message}
     ]
     
@@ -175,7 +189,7 @@ def chat_completion_with_image(
         user_content = [{"type": "text", "text": "Analyze this content."}]
     
     messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "system", "content": get_system_prompt()},
         {"role": "user", "content": user_content}
     ]
     

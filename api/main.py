@@ -159,9 +159,25 @@ app = FastAPI(title="Nima AI Brain API", version="1.0.0")
 # Startup event: Log environment configuration
 @app.on_event("startup")
 async def startup_event():
-    """Log environment configuration on startup."""
+    """Log environment configuration on startup and lazy load heavy resources."""
     import logging
+    global SYSTEM_PROMPT
     logger = logging.getLogger("brain")
+    
+    # Lazy load system prompt (moved here to prevent startup timeout)
+    try:
+        SYSTEM_PROMPT = load_brain_memory()
+        print("=" * 60)
+        print("NIMA AI BRAIN API - Starting...")
+        print("=" * 60)
+        print(f"System Prompt Length: {len(SYSTEM_PROMPT)} characters")
+        print(f"Quality Engine: {'Enabled' if QUALITY_ENGINE_ENABLED else 'Disabled'}")
+        print("VisualTrust: Using OpenCV + local extractor (no TensorFlow)")
+        print("=" * 60)
+    except Exception as e:
+        logger.exception(f"Failed to load brain memory: {e}")
+        SYSTEM_PROMPT = ""  # Fallback to empty prompt
+        print(f"⚠️  Warning: Failed to load brain memory: {e}")
     
     try:
         from api.core.config import get_main_brain_backend_url, is_local_dev
@@ -754,17 +770,9 @@ def _safe_visual_trust_analysis(
             pass
 
 
-# Load system prompt at startup
-SYSTEM_PROMPT = load_brain_memory()
+# Lazy load system prompt (moved to startup event to prevent timeout)
+SYSTEM_PROMPT = None
 QUALITY_ENGINE_ENABLED = True
-
-print("=" * 60)
-print("NIMA AI BRAIN API - Starting...")
-print("=" * 60)
-print(f"System Prompt Length: {len(SYSTEM_PROMPT)} characters")
-print(f"Quality Engine: {'Enabled' if QUALITY_ENGINE_ENABLED else 'Disabled'}")
-print("VisualTrust: Using OpenCV + local extractor (no TensorFlow)")
-print("=" * 60)
 
 
 class ChatRequest(BaseModel):
@@ -796,11 +804,12 @@ class BrainResponse(BaseModel):
 
 @app.get("/")
 def root():
+    """Root endpoint - fast response for health checks"""
     return {
         "status": "ok",
-        "message": "Nima AI Brain API",
-        "system_prompt_loaded": len(SYSTEM_PROMPT) > 0,
-        "system_prompt_length": len(SYSTEM_PROMPT),
+        "service": "nima-ai-marketing-api",
+        "system_prompt_loaded": SYSTEM_PROMPT is not None and len(SYSTEM_PROMPT) > 0 if SYSTEM_PROMPT else False,
+        "system_prompt_length": len(SYSTEM_PROMPT) if SYSTEM_PROMPT else 0,
         "quality_engine_enabled": QUALITY_ENGINE_ENABLED
     }
 
@@ -1027,9 +1036,12 @@ async def brain_endpoint(
         )
         
         print("\n=== SYSTEM PROMPT USED ===")
-        print(SYSTEM_PROMPT[:500])
-        print("...")
-        print(f"(Total length: {len(SYSTEM_PROMPT)} characters)")
+        if SYSTEM_PROMPT:
+            print(SYSTEM_PROMPT[:500])
+            print("...")
+            print(f"(Total length: {len(SYSTEM_PROMPT)} characters)")
+        else:
+            print("System prompt not loaded yet")
         
         print("\n=== QUALITY ENGINE STATUS ===")
         print(f"Quality Engine Active: {QUALITY_ENGINE_ENABLED}")
@@ -1210,7 +1222,7 @@ def chat(request: ChatRequest):
 
 @app.get("/health")
 def health():
-    """Health check endpoint for deployment monitoring"""
+    """Health check endpoint for deployment monitoring - must respond within 2 seconds"""
     return {"status": "ok"}
 
 
@@ -1305,8 +1317,8 @@ def system_prompt_info():
         }
     
     return {
-        "system_prompt_length": len(SYSTEM_PROMPT),
-        "system_prompt_preview": SYSTEM_PROMPT[:500],
+        "system_prompt_length": len(SYSTEM_PROMPT) if SYSTEM_PROMPT else 0,
+        "system_prompt_preview": SYSTEM_PROMPT[:500] if SYSTEM_PROMPT else "",
         "files": file_status,
         "quality_engine_enabled": QUALITY_ENGINE_ENABLED
     }
