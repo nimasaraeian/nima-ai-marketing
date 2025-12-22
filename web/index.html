@@ -175,6 +175,48 @@
         </div>
     </div>
 
+    <!-- Human Decision Review Section -->
+    <section class="modules-section" id="human-decision">
+        <div class="container">
+            <h2 class="section-title">Human Decision Review</h2>
+            <p class="hero-description">
+                Paste a URL. You'll get a human-readable conversion report with visual evidence.
+            </p>
+
+            <form id="humanDecisionForm" class="module-card" onsubmit="submitHumanDecisionReview(event)">
+                <div class="form-group">
+                    <label class="form-label" for="humanDecisionUrl">URL</label>
+                    <input id="humanDecisionUrl" type="url" class="form-input" name="url" placeholder="https://example.com" required />
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="humanDecisionGoal">Goal</label>
+                    <select id="humanDecisionGoal" class="form-select" name="goal">
+                        <option value="leads">Leads</option>
+                        <option value="sales">Sales</option>
+                        <option value="booking">Booking</option>
+                        <option value="contact">Contact</option>
+                        <option value="subscribe">Subscribe</option>
+                        <option value="other" selected>Other</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label" for="humanDecisionLocale">Locale</label>
+                    <select id="humanDecisionLocale" class="form-select" name="locale">
+                        <option value="en" selected>English</option>
+                        <option value="fa">فارسی</option>
+                        <option value="tr">Türkçe</option>
+                    </select>
+                </div>
+
+                <div style="display: flex; gap: 1rem;">
+                    <button type="submit" class="btn btn-primary">Generate report</button>
+                </div>
+            </form>
+        </div>
+    </section>
+
     <!-- Visual Trust + Psychology (Pro) Section -->
     <section class="modules-section" id="visual-pro">
         <div class="container">

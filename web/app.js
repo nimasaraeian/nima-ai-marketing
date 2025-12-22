@@ -13,7 +13,10 @@ function getApiBaseUrl() {
     
     // Auto-detect: if we're on localhost, use localhost API
     const hostname = window.location.hostname;
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '') {
+    const protocol = window.location.protocol;
+    
+    // If opened from file:// protocol, use localhost API
+    if (protocol === 'file:' || hostname === '' || hostname === 'localhost' || hostname === '127.0.0.1') {
         return 'http://127.0.0.1:8000';
     }
     
@@ -29,10 +32,13 @@ async function checkServerHealth() {
     try {
         const response = await fetch(`${API_BASE_URL}/health`, {
             method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            mode: 'cors'  // Explicitly allow CORS
         });
         return response.ok;
     } catch (error) {
+        console.error('Health check failed:', error);
+        console.error('API_BASE_URL:', API_BASE_URL);
         return false;
     }
 }
@@ -298,6 +304,45 @@ function showResults(result, moduleTitle) {
         ? `<span class="quality-score">Quality Score: ${result.quality_score}/5 ✅</span>`
         : `<span class="quality-score" style="background: var(--warning-color);">Quality Score: ${result.quality_score}/5</span>`;
     
+    // Check if we have screenshots from capture_info
+    let screenshotsHtml = '';
+    if (result.capture_info && result.capture_info.screenshots) {
+        const screenshots = result.capture_info.screenshots;
+        const apiBaseUrl = API_BASE_URL;
+        
+        screenshotsHtml = '<div style="margin-top: 2rem; padding-top: 1rem; border-top: 2px solid var(--border-color);">';
+        screenshotsHtml += '<h3 style="margin-bottom: 1rem;">Screenshots</h3>';
+        screenshotsHtml += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem;">';
+        
+        if (screenshots.above_the_fold) {
+            const atfPath = screenshots.above_the_fold.split(/[/\\]/).pop();
+            screenshotsHtml += `
+                <div>
+                    <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Above the Fold</h4>
+                    <img src="${apiBaseUrl}/api/artifacts/${atfPath}" 
+                         alt="Above the fold screenshot" 
+                         style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                         onclick="window.open(this.src, '_blank')" />
+                </div>
+            `;
+        }
+        
+        if (screenshots.full_page) {
+            const fullPath = screenshots.full_page.split(/[/\\]/).pop();
+            screenshotsHtml += `
+                <div>
+                    <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Full Page</h4>
+                    <img src="${apiBaseUrl}/api/artifacts/${fullPath}" 
+                         alt="Full page screenshot" 
+                         style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                         onclick="window.open(this.src, '_blank')" />
+                </div>
+            `;
+        }
+        
+        screenshotsHtml += '</div></div>';
+    }
+    
     container.innerHTML = `
         <div class="results-header">
             <h2>${moduleTitle} - Results</h2>
@@ -316,6 +361,7 @@ function showResults(result, moduleTitle) {
         <div class="results-content">
             ${formatMarkdown(result.response)}
         </div>
+        ${screenshotsHtml}
         <div style="margin-top: 2rem; padding-top: 1rem; border-top: 2px solid var(--border-color);">
             <button class="btn btn-primary" onclick="downloadResults('${moduleTitle}', \`${escapeHtml(result.response)}\`)">Download Results</button>
             <button class="btn btn-secondary" onclick="closeResults()">Close</button>
@@ -847,5 +893,122 @@ document.addEventListener('DOMContentLoaded', async function() {
     }, 500);
 });
 
+// Human Decision Review submission
+async function submitHumanDecisionReview(event) {
+    event.preventDefault();
+    
+    const form = event.target;
+    const formData = new FormData(form);
+    const url = formData.get('url');
+    const goal = formData.get('goal') || 'other';
+    const locale = formData.get('locale') || 'en';
+    
+    if (!url) {
+        alert('Please enter a URL');
+        return;
+    }
+    
+    // Show loading overlay
+    document.getElementById('loadingOverlay').classList.add('active');
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/analyze/url-human`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                url: url,
+                goal: goal,
+                locale: locale
+            })
+        });
+        
+        if (!response.ok) {
+            const errorInfo = await parseErrorResponse(response);
+            throw new Error(errorInfo.message || `خطای ${response.status}`);
+        }
+        
+        const result = await response.json();
+        
+        // Show results with screenshots
+        showHumanDecisionResults(result);
+        
+    } catch (error) {
+        console.error('Human Decision Review error:', error);
+        
+        let errorMessage = 'خطا در تحلیل URL. ';
+        
+        if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+            errorMessage += 'نمی‌توان به سرور متصل شد. لطفاً مطمئن شوید سرور در حال اجرا است.';
+        } else {
+            errorMessage += error.message;
+        }
+        
+        alert(errorMessage);
+    } finally {
+        document.getElementById('loadingOverlay').classList.remove('active');
+    }
+}
 
+// Show Human Decision Review Results
+function showHumanDecisionResults(result) {
+    const modal = document.getElementById('resultsModal');
+    const container = document.getElementById('resultsContainer');
+    
+    // Extract screenshots if available
+    let screenshotsHtml = '';
+    if (result.capture_info && result.capture_info.screenshots) {
+        const screenshots = result.capture_info.screenshots;
+        const apiBaseUrl = API_BASE_URL;
+        
+        screenshotsHtml = '<div style="margin-top: 2rem; padding-top: 1rem; border-top: 2px solid var(--border-color);">';
+        screenshotsHtml += '<h3 style="margin-bottom: 1rem;">Screenshots</h3>';
+        screenshotsHtml += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem;">';
+        
+        if (screenshots.above_the_fold) {
+            const atfPath = screenshots.above_the_fold.split(/[/\\]/).pop();
+            screenshotsHtml += `
+                <div>
+                    <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Above the Fold</h4>
+                    <img src="${apiBaseUrl}/api/artifacts/${atfPath}" 
+                         alt="Above the fold screenshot" 
+                         style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                         onclick="window.open(this.src, '_blank')" />
+                </div>
+            `;
+        }
+        
+        if (screenshots.full_page) {
+            const fullPath = screenshots.full_page.split(/[/\\]/).pop();
+            screenshotsHtml += `
+                <div>
+                    <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Full Page</h4>
+                    <img src="${apiBaseUrl}/api/artifacts/${fullPath}" 
+                         alt="Full page screenshot" 
+                         style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                         onclick="window.open(this.src, '_blank')" />
+                </div>
+            `;
+        }
+        
+        screenshotsHtml += '</div></div>';
+    }
+    
+    container.innerHTML = `
+        <div class="results-header">
+            <h2>Human Decision Review - Results</h2>
+        </div>
+        <div class="results-content">
+            ${result.report ? formatMarkdown(result.report) : '<p>No report available.</p>'}
+        </div>
+        ${screenshotsHtml}
+        <div style="margin-top: 2rem; padding-top: 1rem; border-top: 2px solid var(--border-color);">
+            <button class="btn btn-primary" onclick="downloadResults('Human Decision Review', \`${escapeHtml(result.report || 'No report available.')}\`)">Copy report</button>
+            <button class="btn btn-secondary" onclick="closeResults()">Close</button>
+        </div>
+    `;
+    
+    modal.style.display = 'block';
+}
 
