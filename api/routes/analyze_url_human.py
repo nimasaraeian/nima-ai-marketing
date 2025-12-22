@@ -209,8 +209,8 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         
         # Step 5: Generate human report (use locale from payload, default to English)
         print("[analyze_url_human] Step 5: Generating human report...")
-        report_locale = payload.locale if payload.locale else "en"
-        human_report = await render_human_report(analysis_json, locale=report_locale)
+        # Always use English, ignore locale parameter
+        human_report = await render_human_report(analysis_json, locale="en")
         print("[analyze_url_human] Report generated successfully")
         
         print("[analyze_url_human] ✅ Analysis completed successfully")
