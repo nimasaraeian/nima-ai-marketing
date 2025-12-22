@@ -2237,8 +2237,8 @@ async def psychology_analysis_with_image(
             print(f"[VISUAL_ANALYSIS] Image saved to: {tmp_path} ({tmp_path.stat().st_size} bytes)")
             
             if VISUAL_TRUST_AVAILABLE and analyze_visual_trust_from_path:
-            vt = analyze_visual_trust_from_path(str(tmp_path))
-            print(f"[VISUAL_ANALYSIS] Visual trust analysis completed: {vt.get('trust_label', 'unknown')}")
+                vt = analyze_visual_trust_from_path(str(tmp_path))
+                print(f"[VISUAL_ANALYSIS] Visual trust analysis completed: {vt.get('trust_label', 'unknown')}")
             else:
                 vt = {"trust_label": "unknown", "trust_scores": {}, "trust_score_numeric": 0.0}
                 print(f"[VISUAL_ANALYSIS] Visual trust not available, using fallback")
