@@ -7,9 +7,12 @@ import sys
 import time
 import datetime
 import asyncio
+import logging
 from pathlib import Path
 from typing import Dict, Any
 from playwright.async_api import async_playwright
+
+logger = logging.getLogger(__name__)
 
 # Note: Event loop policy should be set in main.py before FastAPI starts
 # We can't change it here as the loop is already running
@@ -39,10 +42,20 @@ def _capture_sync(url: str, atf_path: str, full_path: str, viewport: dict) -> tu
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         try:
-            page = browser.new_page(viewport=viewport)
+            # Create context with real Chrome user-agent
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                viewport=viewport
+            )
+            page = context.new_page()
             
-            # Use a shorter timeout and less strict wait condition
-            page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            # Use domcontentloaded with explicit timeout and wait
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
+                timeout=60000
+            )
+            page.wait_for_timeout(3000)
             
             # Simple auto-scroll to load lazy sections (reduced iterations for speed)
             for _ in range(3):
@@ -65,6 +78,10 @@ def _capture_sync(url: str, atf_path: str, full_path: str, viewport: dict) -> tu
             readable = page.evaluate("() => document.body ? document.body.innerText : ''")
             
             page.close()
+            context.close()
+        except Exception as e:
+            logger.exception(f"Error during page capture for {url}: {e}")
+            raise
         finally:
             browser.close()
     
@@ -101,11 +118,11 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
             url, atf_path, full_path, viewport
         )
     except Exception as e:
+        # Log exception with full traceback
+        logger.exception(f"Playwright error while capturing {url}: {type(e).__name__}: {str(e)}")
         # Re-raise with more context
         error_msg = f"Playwright error while capturing {url}: {type(e).__name__}: {str(e)}"
         print(f"❌ {error_msg}")
-        import traceback
-        traceback.print_exc()
         raise Exception(error_msg) from e
     
     # Keep excerpts to avoid huge payloads

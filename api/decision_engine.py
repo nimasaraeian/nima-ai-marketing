@@ -1061,6 +1061,16 @@ You MUST choose Outcome Unclear, Effort Too High, or Commitment Anxiety instead.
             )
         except Exception as exc:
             logger.exception("OpenAI API call failed: %s", exc)
+            # Check for quota/rate limit errors
+            error_str = str(exc)
+            if "429" in error_str or "quota" in error_str.lower() or "insufficient_quota" in error_str.lower():
+                error_msg = (
+                    "OpenAI API quota exceeded. Please check your OpenAI account:\n"
+                    "- Visit https://platform.openai.com/usage to check your usage\n"
+                    "- Verify your billing information\n"
+                    "- Consider upgrading your plan if needed"
+                )
+                raise ValueError(error_msg) from exc
             raise
         
         # Extract response
@@ -1917,10 +1927,25 @@ async def decision_engine_report_from_url(payload: ReportFromUrlInput):
         }
     except Exception as e:
         logger.exception(f"Failed to generate decision report: {e}")
+        error_message = str(e)
+        
+        # Provide user-friendly error messages for common issues
+        if "quota" in error_message.lower() or "429" in error_message or "insufficient_quota" in error_message.lower():
+            user_message = (
+                "OpenAI API quota exceeded. Please check your OpenAI account:\n"
+                "- Visit https://platform.openai.com/usage to check your usage\n"
+                "- Verify your billing information\n"
+                "- Consider upgrading your plan if needed"
+            )
+        elif "timeout" in error_message.lower():
+            user_message = "Request timed out. Please try again with a simpler URL or check your internet connection."
+        else:
+            user_message = f"Failed to generate decision report: {error_message[:200]}"
+        
         return {
             "analysisStatus": "error",
             "step": "report",
-            "errorMessage": f"Failed to generate decision report: {str(e)[:200]}"
+            "errorMessage": user_message
         }
 
 
