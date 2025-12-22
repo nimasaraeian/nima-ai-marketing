@@ -120,10 +120,18 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
         )
         
         # Assert files were saved (fail fast)
+        # Check both existence and file size (must be > 0 bytes)
         if not out_atf.exists():
-            raise RuntimeError(f"Artifact not saved: {out_atf}")
+            raise RuntimeError(f"ARTIFACT_MISSING: ATF screenshot not saved: {out_atf}")
+        if out_atf.stat().st_size == 0:
+            raise RuntimeError(f"ARTIFACT_INVALID: ATF screenshot is empty: {out_atf}")
+        
         if not out_full.exists():
-            raise RuntimeError(f"Artifact not saved: {out_full}")
+            raise RuntimeError(f"ARTIFACT_MISSING: Full page screenshot not saved: {out_full}")
+        if out_full.stat().st_size == 0:
+            raise RuntimeError(f"ARTIFACT_INVALID: Full page screenshot is empty: {out_full}")
+        
+        logger.info(f"Screenshots verified: ATF={out_atf.stat().st_size} bytes, Full={out_full.stat().st_size} bytes")
     except Exception as e:
         # Log exception with full traceback
         logger.exception(f"Playwright error while capturing {url}: {type(e).__name__}: {str(e)}")

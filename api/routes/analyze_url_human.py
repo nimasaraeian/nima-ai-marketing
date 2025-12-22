@@ -103,6 +103,9 @@ async def analyze_url_human_simple(payload: AnalyzeUrlHumanRequest) -> Dict[str,
 @router.post("/api/analyze/url-human/test-capture")
 async def test_capture_only(payload: AnalyzeUrlHumanRequest, request: FastAPIRequest) -> Dict[str, Any]:
     """Test only the capture step."""
+    import os
+    from api.paths import ARTIFACTS_DIR
+    
     try:
         print(f"[test_capture] Starting capture for: {payload.url}")
         capture = await capture_page_artifacts(str(payload.url))
@@ -111,6 +114,34 @@ async def test_capture_only(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         screenshots_raw = capture.get("screenshots", {})
         atf_filename = screenshots_raw.get("above_the_fold")
         full_filename = screenshots_raw.get("full_page")
+        
+        # Post-capture verification: Check files actually exist and are accessible
+        atf_path = ARTIFACTS_DIR / atf_filename if atf_filename else None
+        full_path = ARTIFACTS_DIR / full_filename if full_filename else None
+        
+        verification_errors = []
+        if atf_path and not os.path.exists(str(atf_path)):
+            verification_errors.append(f"ATF screenshot missing: {atf_path}")
+        elif atf_path and os.path.getsize(str(atf_path)) == 0:
+            verification_errors.append(f"ATF screenshot is empty: {atf_path}")
+        
+        if full_path and not os.path.exists(str(full_path)):
+            verification_errors.append(f"Full page screenshot missing: {full_path}")
+        elif full_path and os.path.getsize(str(full_path)) == 0:
+            verification_errors.append(f"Full page screenshot is empty: {full_path}")
+        
+        if verification_errors:
+            error_msg = "; ".join(verification_errors)
+            logger.error(f"[test_capture] Artifact verification failed: {error_msg}")
+            return {
+                "analysisStatus": "error",
+                "url": payload.url,
+                "error": {
+                    "message": error_msg,
+                    "stage": "artifact_missing"
+                },
+                "capture": None
+            }
         
         # Build URLs from filenames - use x-forwarded-proto and host for Railway compatibility
         proto = request.headers.get("x-forwarded-proto", "http")
@@ -137,11 +168,18 @@ async def test_capture_only(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         import traceback
         error_detail = str(e) if str(e) else f"{type(e).__name__}: An error occurred"
         traceback.print_exc()
+        
+        # Check if it's an artifact missing error
+        error_stage = "artifact_missing" if "ARTIFACT_MISSING" in error_detail or "ARTIFACT_INVALID" in error_detail else "capture_failed"
+        
         # Return error response with analysisStatus instead of raising HTTPException
         return {
             "analysisStatus": "error",
             "url": payload.url,
-            "error": error_detail,
+            "error": {
+                "message": error_detail,
+                "stage": error_stage
+            },
             "capture": None
         }
 

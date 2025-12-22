@@ -2,6 +2,7 @@
 Unit/integration tests for /api/analyze/url-human endpoints.
 """
 import pytest
+import requests
 from fastapi.testclient import TestClient
 from api.main import app
 
@@ -96,4 +97,65 @@ def test_analyze_url_human_error_handling():
     # Should have analysisStatus == "error"
     assert "analysisStatus" in data, "Response must contain 'analysisStatus' field"
     assert data["analysisStatus"] == "error", f"Expected analysisStatus='error' for invalid input, got '{data['analysisStatus']}'"
+
+
+def test_screenshot_urls_accessible():
+    """
+    Integration test: Verify screenshot URLs are actually accessible.
+    
+    This test:
+    1. Calls /api/analyze/url-human
+    2. Extracts screenshot URLs from response
+    3. Fetches both screenshot URLs
+    4. Asserts HTTP 200 for both
+    """
+    payload = {
+        "url": "https://example.com",
+        "goal": "leads",
+        "locale": "en"
+    }
+    
+    # Step 1: Call the analysis endpoint
+    response = client.post("/api/analyze/url-human", json=payload)
+    
+    assert response.status_code == 200, f"Expected 200, got {response.status_code}. Response: {response.text}"
+    
+    data = response.json()
+    assert data.get("analysisStatus") == "ok", "Analysis must succeed"
+    
+    # Step 2: Extract screenshot URLs
+    screenshots = data.get("screenshots", {})
+    atf_url = screenshots.get("above_the_fold")
+    full_url = screenshots.get("full_page")
+    
+    assert atf_url is not None, "above_the_fold URL must be present"
+    assert full_url is not None, "full_page URL must be present"
+    
+    # Step 3 & 4: Fetch both URLs and assert HTTP 200
+    # Note: In test environment, we need to use the test client's base URL
+    # For production, these would be absolute URLs
+    
+    # Extract just the path from the URL for local testing
+    if atf_url.startswith("http"):
+        # Production URL - would need actual HTTP request
+        # For now, we'll test the path directly
+        atf_path = "/" + "/".join(atf_url.split("/")[-2:])  # Extract /api/artifacts/filename
+    else:
+        atf_path = atf_url
+    
+    if full_url.startswith("http"):
+        full_path = "/" + "/".join(full_url.split("/")[-2:])
+    else:
+        full_path = full_url
+    
+    # Fetch screenshots using test client
+    atf_response = client.get(atf_path)
+    assert atf_response.status_code == 200, f"ATF screenshot must be accessible. Got {atf_response.status_code} for {atf_path}"
+    assert atf_response.headers.get("content-type") == "image/png", "ATF must be PNG image"
+    assert len(atf_response.content) > 0, "ATF screenshot must have content"
+    
+    full_response = client.get(full_path)
+    assert full_response.status_code == 200, f"Full page screenshot must be accessible. Got {full_response.status_code} for {full_path}"
+    assert full_response.headers.get("content-type") == "image/png", "Full page must be PNG image"
+    assert len(full_response.content) > 0, "Full page screenshot must have content"
 
