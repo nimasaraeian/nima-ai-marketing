@@ -1850,7 +1850,7 @@ async def decision_engine_report_from_url(payload: ReportFromUrlInput):
     
     # Step 3: Capture screenshot (using internal function, not HTTP)
     try:
-        from ..routes.debug_screenshot import capture_url_png_bytes
+        from .services.screenshot import capture_url_png_bytes
         screenshot_bytes = await asyncio.to_thread(capture_url_png_bytes, url)
     except Exception as e:
         logger.exception(f"Failed to capture screenshot: {e}")
@@ -1908,6 +1908,7 @@ async def decision_engine_report_from_url(payload: ReportFromUrlInput):
             "contentPreview": content_preview,
             "visualTrust": visual_trust_result,
             "report": report_text,  # Add report at root level for frontend compatibility
+            "human_report": report_text,  # Add human_report for frontend compatibility
             "decisionReport": {
                 "report": report_text,
                 "raw_analysis": decision_output,
