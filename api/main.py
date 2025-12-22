@@ -1456,6 +1456,25 @@ def list_artifacts():
         }
 
 
+@app.get("/api/_debug/artifacts/ls")
+def debug_artifacts_ls(limit: int = 50):
+    """Debug endpoint to list artifacts files."""
+    from pathlib import Path
+    p = Path(ARTIFACTS_DIR)
+    if not p.exists():
+        return {"exists": False, "path": str(p), "files": []}
+    files = sorted([f.name for f in p.glob("*")])[-limit:]
+    return {"exists": True, "path": str(p), "count": len(files), "files": files}
+
+
+@app.get("/api/_debug/artifacts/exists")
+def debug_artifacts_exists(name: str):
+    """Debug endpoint to check if a specific artifact file exists."""
+    from pathlib import Path
+    p = Path(ARTIFACTS_DIR) / name
+    return {"path": str(p), "exists": p.exists(), "size": (p.stat().st_size if p.exists() else None)}
+
+
 @app.get("/debug/env")
 def debug_env():
     """
