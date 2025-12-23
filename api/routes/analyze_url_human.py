@@ -37,6 +37,9 @@ def _public_file_url(
     """
     Convert internal absolute path to public file URL.
     
+    Uses PUBLIC_BASE_URL env var if set (production), otherwise falls back to
+    request headers/base_url (local development).
+    
     Args:
         request: FastAPI Request object
         abs_path: Absolute path to file (e.g., /app/api/artifacts/screenshot.png)
@@ -49,10 +52,21 @@ def _public_file_url(
         return None
     
     p = Path(abs_path)
-    # Use x-forwarded-proto and host headers for Railway compatibility
-    proto = request.headers.get("x-forwarded-proto", "http")
-    host = request.headers.get("host")
-    base_url = f"{proto}://{host}" if host else str(request.base_url).rstrip("/")
+    
+    # Check for PUBLIC_BASE_URL env var first (production)
+    from api.core.config import get_public_base_url
+    public_base_url = get_public_base_url()
+    
+    if public_base_url:
+        # Use PUBLIC_BASE_URL (production)
+        base_url = public_base_url.rstrip("/")
+    else:
+        # Fallback to request-based URL (local development)
+        # Use x-forwarded-proto and host headers for Railway compatibility
+        proto = request.headers.get("x-forwarded-proto", "http")
+        host = request.headers.get("host")
+        base_url = f"{proto}://{host}" if host else str(request.base_url).rstrip("/")
+    
     return f"{base_url}{mount_prefix}/{p.name}"
 
 
@@ -149,10 +163,19 @@ async def test_capture_only(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
                 "capture": None
             }
         
-        # Build URLs from filenames - use x-forwarded-proto and host for Railway compatibility
-        proto = request.headers.get("x-forwarded-proto", "http")
-        host = request.headers.get("host")
-        base_url = f"{proto}://{host}" if host else str(request.base_url).rstrip("/")
+        # Build base URL - use PUBLIC_BASE_URL if set (production), otherwise fallback to request
+        from api.core.config import get_public_base_url
+        public_base_url = get_public_base_url()
+        
+        if public_base_url:
+            # Use PUBLIC_BASE_URL (production)
+            base_url = public_base_url.rstrip("/")
+        else:
+            # Fallback to request-based URL (local development)
+            # Use x-forwarded-proto and host headers for Railway compatibility
+            proto = request.headers.get("x-forwarded-proto", "http")
+            host = request.headers.get("host")
+            base_url = f"{proto}://{host}" if host else str(request.base_url).rstrip("/")
         
         # Build screenshot URLs for new structure
         screenshots_response = {
@@ -336,10 +359,19 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
                 "screenshots": None
             }
         
-        # Use x-forwarded-proto and host headers for Railway compatibility
-        proto = request.headers.get("x-forwarded-proto", "http")
-        host = request.headers.get("host")
-        base_url = f"{proto}://{host}" if host else str(request.base_url).rstrip("/")
+        # Build base URL - use PUBLIC_BASE_URL if set (production), otherwise fallback to request
+        from api.core.config import get_public_base_url
+        public_base_url = get_public_base_url()
+        
+        if public_base_url:
+            # Use PUBLIC_BASE_URL (production)
+            base_url = public_base_url.rstrip("/")
+        else:
+            # Fallback to request-based URL (local development)
+            # Use x-forwarded-proto and host headers for Railway compatibility
+            proto = request.headers.get("x-forwarded-proto", "http")
+            host = request.headers.get("host")
+            base_url = f"{proto}://{host}" if host else str(request.base_url).rstrip("/")
         
         # Build screenshot URLs for new structure
         screenshots_response = {

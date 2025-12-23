@@ -42,6 +42,19 @@ def get_env(name: str, default: str | None = None) -> str | None:
     return v
 
 
+def get_public_base_url() -> str | None:
+    """
+    Get PUBLIC_BASE_URL environment variable.
+    
+    This should be set in production to the public-facing URL of the API
+    (e.g., https://nima-ai-marketing-production.up.railway.app).
+    
+    Returns:
+        Public base URL or None if not set
+    """
+    return get_env("PUBLIC_BASE_URL")
+
+
 def is_local_dev() -> bool:
     """
     Determine if running in local development mode.
