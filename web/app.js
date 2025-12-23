@@ -304,11 +304,58 @@ function showResults(result, moduleTitle) {
         ? `<span class="quality-score">Quality Score: ${result.quality_score}/5 ✅</span>`
         : `<span class="quality-score" style="background: var(--warning-color);">Quality Score: ${result.quality_score}/5</span>`;
     
-    // Check if we have screenshots from capture_info
+    // Check if we have screenshots from capture_info (old format) or screenshots (new format from /analyze-url)
     let screenshotsHtml = '';
-    if (result.capture_info && result.capture_info.screenshots) {
+    const apiBaseUrl = API_BASE_URL;
+    
+    // Check for new format: result.screenshots (from /analyze-url endpoint)
+    if (result.screenshots) {
+        const screenshots = result.screenshots;
+        screenshotsHtml = '<div style="margin-top: 2rem; padding-top: 1rem; border-top: 2px solid var(--border-color);">';
+        screenshotsHtml += '<h3 style="margin-bottom: 1rem;">Screenshots</h3>';
+        screenshotsHtml += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem;">';
+        
+        // Desktop screenshot
+        if (screenshots.desktop && screenshots.desktop.url) {
+            const desktopUrl = screenshots.desktop.url.startsWith('http') 
+                ? screenshots.desktop.url 
+                : `${apiBaseUrl}${screenshots.desktop.url}`;
+            screenshotsHtml += `
+                <div>
+                    <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Desktop View</h4>
+                    <img src="${desktopUrl}" 
+                         alt="Desktop screenshot" 
+                         style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                         onclick="window.open(this.src, '_blank')" 
+                         onerror="this.parentElement.innerHTML='<p style=\\'color: red;\\'>Failed to load desktop screenshot</p>'" />
+                    ${screenshots.desktop.error ? `<p style="color: #f59e0b; font-size: 0.875rem; margin-top: 0.5rem;">⚠️ ${screenshots.desktop.error}</p>` : ''}
+                </div>
+            `;
+        }
+        
+        // Mobile screenshot
+        if (screenshots.mobile && screenshots.mobile.url) {
+            const mobileUrl = screenshots.mobile.url.startsWith('http') 
+                ? screenshots.mobile.url 
+                : `${apiBaseUrl}${screenshots.mobile.url}`;
+            screenshotsHtml += `
+                <div>
+                    <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Mobile View</h4>
+                    <img src="${mobileUrl}" 
+                         alt="Mobile screenshot" 
+                         style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                         onclick="window.open(this.src, '_blank')" 
+                         onerror="this.parentElement.innerHTML='<p style=\\'color: red;\\'>Failed to load mobile screenshot</p>'" />
+                    ${screenshots.mobile.error ? `<p style="color: #f59e0b; font-size: 0.875rem; margin-top: 0.5rem;">⚠️ ${screenshots.mobile.error}</p>` : ''}
+                </div>
+            `;
+        }
+        
+        screenshotsHtml += '</div></div>';
+    }
+    // Check for old format: result.capture_info.screenshots
+    else if (result.capture_info && result.capture_info.screenshots) {
         const screenshots = result.capture_info.screenshots;
-        const apiBaseUrl = API_BASE_URL;
         
         screenshotsHtml = '<div style="margin-top: 2rem; padding-top: 1rem; border-top: 2px solid var(--border-color);">';
         screenshotsHtml += '<h3 style="margin-bottom: 1rem;">Screenshots</h3>';
@@ -892,6 +939,150 @@ document.addEventListener('DOMContentLoaded', async function() {
         }
     }, 500);
 });
+
+// URL Analysis submission
+async function submitUrlAnalysis(event) {
+    event.preventDefault();
+    
+    const form = event.target;
+    const formData = new FormData(form);
+    const url = formData.get('url');
+    
+    if (!url) {
+        alert('Please enter a URL');
+        return;
+    }
+    
+    // Show loading overlay
+    document.getElementById('loadingOverlay').classList.add('active');
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/analyze-url`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                url: url
+            })
+        });
+        
+        if (!response.ok) {
+            const errorInfo = await parseErrorResponse(response);
+            throw new Error(errorInfo.message || `خطای ${response.status}`);
+        }
+        
+        const result = await response.json();
+        
+        // Show results with screenshots
+        showUrlAnalysisResults(result);
+        
+    } catch (error) {
+        console.error('URL Analysis error:', error);
+        
+        let errorMessage = 'خطا در تحلیل URL. ';
+        
+        if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+            errorMessage += 'نمی‌توان به سرور متصل شد. لطفاً مطمئن شوید سرور در حال اجرا است.';
+        } else {
+            errorMessage += error.message;
+        }
+        
+        alert(errorMessage);
+    } finally {
+        document.getElementById('loadingOverlay').classList.remove('active');
+    }
+}
+
+// Show URL Analysis Results
+function showUrlAnalysisResults(result) {
+    const modal = document.getElementById('resultsModal');
+    const container = document.getElementById('resultsContainer');
+    
+    // Extract analysis data
+    const visualTrust = result.visualTrust || {};
+    const brain = result.brain || {};
+    const features = result.features || {};
+    
+    // Build screenshots HTML
+    let screenshotsHtml = '';
+    if (result.screenshots) {
+        const screenshots = result.screenshots;
+        const apiBaseUrl = API_BASE_URL;
+        
+        screenshotsHtml = '<div style="margin-top: 2rem; padding-top: 1rem; border-top: 2px solid var(--border-color);">';
+        screenshotsHtml += '<h3 style="margin-bottom: 1rem;">Screenshots</h3>';
+        screenshotsHtml += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem;">';
+        
+        // Desktop screenshot
+        if (screenshots.desktop && screenshots.desktop.url) {
+            const desktopUrl = screenshots.desktop.url.startsWith('http') 
+                ? screenshots.desktop.url 
+                : `${apiBaseUrl}${screenshots.desktop.url}`;
+            screenshotsHtml += `
+                <div>
+                    <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Desktop View</h4>
+                    <img src="${desktopUrl}" 
+                         alt="Desktop screenshot" 
+                         style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                         onclick="window.open(this.src, '_blank')" 
+                         onerror="this.parentElement.innerHTML='<p style=\\'color: red;\\'>Failed to load desktop screenshot</p>'" />
+                    ${screenshots.desktop.error ? `<p style="color: #f59e0b; font-size: 0.875rem; margin-top: 0.5rem;">⚠️ ${screenshots.desktop.error}</p>` : ''}
+                </div>
+            `;
+        }
+        
+        // Mobile screenshot
+        if (screenshots.mobile && screenshots.mobile.url) {
+            const mobileUrl = screenshots.mobile.url.startsWith('http') 
+                ? screenshots.mobile.url 
+                : `${apiBaseUrl}${screenshots.mobile.url}`;
+            screenshotsHtml += `
+                <div>
+                    <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Mobile View</h4>
+                    <img src="${mobileUrl}" 
+                         alt="Mobile screenshot" 
+                         style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                         onclick="window.open(this.src, '_blank')" 
+                         onerror="this.parentElement.innerHTML='<p style=\\'color: red;\\'>Failed to load mobile screenshot</p>'" />
+                    ${screenshots.mobile.error ? `<p style="color: #f59e0b; font-size: 0.875rem; margin-top: 0.5rem;">⚠️ ${screenshots.mobile.error}</p>` : ''}
+                </div>
+            `;
+        }
+        
+        screenshotsHtml += '</div></div>';
+    }
+    
+    // Build analysis summary
+    let analysisSummary = '';
+    if (visualTrust && visualTrust.label) {
+        analysisSummary += `<p><strong>Visual Trust:</strong> ${visualTrust.label} (${(visualTrust.confidence * 100).toFixed(1)}%)</p>`;
+    }
+    if (brain && brain.decision) {
+        analysisSummary += `<p><strong>Decision:</strong> ${brain.decision}</p>`;
+    }
+    if (brain && brain.confidence !== undefined) {
+        analysisSummary += `<p><strong>Confidence:</strong> ${(brain.confidence * 100).toFixed(1)}%</p>`;
+    }
+    
+    container.innerHTML = `
+        <div class="results-header">
+            <h2>URL Analysis Results</h2>
+            <p><strong>URL:</strong> ${result.url || 'N/A'}</p>
+            ${analysisSummary}
+        </div>
+        <div class="results-content">
+            ${result.extractedText ? `<div style="margin-bottom: 1rem;"><h3>Extracted Text</h3><p>${result.extractedText.substring(0, 500)}${result.extractedText.length > 500 ? '...' : ''}</p></div>` : ''}
+            ${result.brain && result.brain.explanation ? `<div style="margin-bottom: 1rem;"><h3>Analysis</h3>${formatMarkdown(result.brain.explanation)}</div>` : ''}
+        </div>
+        ${screenshotsHtml}
+        <div style="margin-top: 2rem; padding-top: 1rem; border-top: 2px solid var(--border-color);">
+            <button class="btn btn-secondary" onclick="closeResults()">Close</button>
+        </div>
+    `;
+    
+    modal.style.display = 'block';
+}
 
 // Human Decision Review submission
 async function submitHumanDecisionReview(event) {

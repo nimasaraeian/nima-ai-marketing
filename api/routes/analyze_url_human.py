@@ -110,25 +110,31 @@ async def test_capture_only(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         print(f"[test_capture] Starting capture for: {payload.url}")
         capture = await capture_page_artifacts(str(payload.url))
         
-        # Get screenshot filenames from capture (now returns only filenames)
+        # Get screenshot filenames from capture (new structure with desktop and mobile)
         screenshots_raw = capture.get("screenshots", {})
-        atf_filename = screenshots_raw.get("above_the_fold")
-        full_filename = screenshots_raw.get("full_page")
+        desktop_screenshots = screenshots_raw.get("desktop", {})
+        mobile_screenshots = screenshots_raw.get("mobile", {})
+        
+        # Extract filenames
+        desktop_atf_filename = desktop_screenshots.get("above_the_fold")
+        desktop_full_filename = desktop_screenshots.get("full_page")
+        mobile_atf_filename = mobile_screenshots.get("above_the_fold")
+        mobile_full_filename = mobile_screenshots.get("full_page")
         
         # Post-capture verification: Check files actually exist and are accessible
-        atf_path = ARTIFACTS_DIR / atf_filename if atf_filename else None
-        full_path = ARTIFACTS_DIR / full_filename if full_filename else None
+        screenshots_to_check = [
+            (ARTIFACTS_DIR / desktop_atf_filename if desktop_atf_filename else None, "Desktop ATF"),
+            (ARTIFACTS_DIR / desktop_full_filename if desktop_full_filename else None, "Desktop Full"),
+            (ARTIFACTS_DIR / mobile_atf_filename if mobile_atf_filename else None, "Mobile ATF"),
+            (ARTIFACTS_DIR / mobile_full_filename if mobile_full_filename else None, "Mobile Full"),
+        ]
         
         verification_errors = []
-        if atf_path and not os.path.exists(str(atf_path)):
-            verification_errors.append(f"ATF screenshot missing: {atf_path}")
-        elif atf_path and os.path.getsize(str(atf_path)) == 0:
-            verification_errors.append(f"ATF screenshot is empty: {atf_path}")
-        
-        if full_path and not os.path.exists(str(full_path)):
-            verification_errors.append(f"Full page screenshot missing: {full_path}")
-        elif full_path and os.path.getsize(str(full_path)) == 0:
-            verification_errors.append(f"Full page screenshot is empty: {full_path}")
+        for screenshot_path, name in screenshots_to_check:
+            if screenshot_path and not os.path.exists(str(screenshot_path)):
+                verification_errors.append(f"{name} screenshot missing: {screenshot_path}")
+            elif screenshot_path and os.path.getsize(str(screenshot_path)) == 0:
+                verification_errors.append(f"{name} screenshot is empty: {screenshot_path}")
         
         if verification_errors:
             error_msg = "; ".join(verification_errors)
@@ -148,8 +154,19 @@ async def test_capture_only(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         host = request.headers.get("host")
         base_url = f"{proto}://{host}" if host else str(request.base_url).rstrip("/")
         
-        atf_url = f"{base_url}/api/artifacts/{atf_filename}" if atf_filename else None
-        full_url = f"{base_url}/api/artifacts/{full_filename}" if full_filename else None
+        # Build screenshot URLs for new structure
+        screenshots_response = {
+            "desktop": {
+                "above_the_fold": f"{base_url}/api/artifacts/{desktop_atf_filename}" if desktop_atf_filename else None,
+                "full_page": f"{base_url}/api/artifacts/{desktop_full_filename}" if desktop_full_filename else None,
+                "viewport": desktop_screenshots.get("viewport", {"width": 1365, "height": 768})
+            },
+            "mobile": {
+                "above_the_fold": f"{base_url}/api/artifacts/{mobile_atf_filename}" if mobile_atf_filename else None,
+                "full_page": f"{base_url}/api/artifacts/{mobile_full_filename}" if mobile_full_filename else None,
+                "viewport": mobile_screenshots.get("viewport", {"width": 390, "height": 844})
+            }
+        }
         
         return {
             "analysisStatus": "ok",
@@ -158,10 +175,7 @@ async def test_capture_only(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
                 "timestamp": capture.get("timestamp_utc"),
                 "title": capture.get("dom", {}).get("title"),
                 "html_length": len(capture.get("dom", {}).get("html_excerpt", "")),
-                "screenshots": {
-                    "above_the_fold": atf_url,
-                    "full_page": full_url
-                }
+                "screenshots": screenshots_response
             }
         }
     except Exception as e:
@@ -275,28 +289,34 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         
         print("[analyze_url_human] ✅ Analysis completed successfully")
         
-        # Screenshots now return only filenames, build URLs from filenames
+        # Screenshots now return new structure with desktop and mobile
         screenshots_raw = capture.get("screenshots", {})
-        atf_filename = screenshots_raw.get("above_the_fold")
-        full_filename = screenshots_raw.get("full_page")
+        desktop_screenshots = screenshots_raw.get("desktop", {})
+        mobile_screenshots = screenshots_raw.get("mobile", {})
+        
+        # Extract filenames
+        desktop_atf_filename = desktop_screenshots.get("above_the_fold")
+        desktop_full_filename = desktop_screenshots.get("full_page")
+        mobile_atf_filename = mobile_screenshots.get("above_the_fold")
+        mobile_full_filename = mobile_screenshots.get("full_page")
         
         # Post-capture verification: Check files actually exist and are accessible
         import os
         from api.paths import ARTIFACTS_DIR
         
-        atf_path = ARTIFACTS_DIR / atf_filename if atf_filename else None
-        full_path = ARTIFACTS_DIR / full_filename if full_filename else None
+        screenshots_to_check = [
+            (ARTIFACTS_DIR / desktop_atf_filename if desktop_atf_filename else None, "Desktop ATF"),
+            (ARTIFACTS_DIR / desktop_full_filename if desktop_full_filename else None, "Desktop Full"),
+            (ARTIFACTS_DIR / mobile_atf_filename if mobile_atf_filename else None, "Mobile ATF"),
+            (ARTIFACTS_DIR / mobile_full_filename if mobile_full_filename else None, "Mobile Full"),
+        ]
         
         verification_errors = []
-        if atf_path and not os.path.exists(str(atf_path)):
-            verification_errors.append(f"ATF screenshot missing: {atf_path}")
-        elif atf_path and os.path.getsize(str(atf_path)) == 0:
-            verification_errors.append(f"ATF screenshot is empty: {atf_path}")
-        
-        if full_path and not os.path.exists(str(full_path)):
-            verification_errors.append(f"Full page screenshot missing: {full_path}")
-        elif full_path and os.path.getsize(str(full_path)) == 0:
-            verification_errors.append(f"Full page screenshot is empty: {full_path}")
+        for screenshot_path, name in screenshots_to_check:
+            if screenshot_path and not os.path.exists(str(screenshot_path)):
+                verification_errors.append(f"{name} screenshot missing: {screenshot_path}")
+            elif screenshot_path and os.path.getsize(str(screenshot_path)) == 0:
+                verification_errors.append(f"{name} screenshot is empty: {screenshot_path}")
         
         if verification_errors:
             error_msg = "; ".join(verification_errors)
@@ -321,8 +341,19 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         host = request.headers.get("host")
         base_url = f"{proto}://{host}" if host else str(request.base_url).rstrip("/")
         
-        atf_url = f"{base_url}/api/artifacts/{atf_filename}" if atf_filename else None
-        full_url = f"{base_url}/api/artifacts/{full_filename}" if full_filename else None
+        # Build screenshot URLs for new structure
+        screenshots_response = {
+            "desktop": {
+                "above_the_fold": f"{base_url}/api/artifacts/{desktop_atf_filename}" if desktop_atf_filename else None,
+                "full_page": f"{base_url}/api/artifacts/{desktop_full_filename}" if desktop_full_filename else None,
+                "viewport": desktop_screenshots.get("viewport", {"width": 1365, "height": 768})
+            },
+            "mobile": {
+                "above_the_fold": f"{base_url}/api/artifacts/{mobile_atf_filename}" if mobile_atf_filename else None,
+                "full_page": f"{base_url}/api/artifacts/{mobile_full_filename}" if mobile_full_filename else None,
+                "viewport": mobile_screenshots.get("viewport", {"width": 390, "height": 844})
+            }
+        }
         
         # Limit response size - don't send full HTML/capture data
         response_data = {
@@ -340,10 +371,7 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
             "findings": findings.get("findings", {}),
             "capture_info": {
                 "timestamp": capture.get("timestamp_utc"),
-                "screenshots": {
-                    "above_the_fold": atf_url,
-                    "full_page": full_url,
-                },
+                "screenshots": screenshots_response,
                 "title": capture.get("dom", {}).get("title"),
             },
             "page_map": {
@@ -351,11 +379,8 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
                 "ctas": page_map.get("ctas", []),
                 "trust_signals": page_map.get("trust_signals", []),
             },
-            # Add public screenshots URLs at root level for easy access
-            "screenshots": {
-                "above_the_fold": atf_url,
-                "full_page": full_url,
-            }
+            # Add public screenshots URLs at root level for easy access (new structure)
+            "screenshots": screenshots_response
         }
         
         return response_data

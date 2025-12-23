@@ -39,7 +39,41 @@ export async function postToBrain<T = any>(endpoint: string, payload: any): Prom
   if (!res.ok) {
     const errorText = await res.text();
     console.error('[Brain API] Error:', res.status, errorText);
-    throw new Error(`Failed to connect to backend API at ${endpoint}. Please ensure the backend is running on ${BACKEND_BASE_URL}`);
+    
+    // Try to extract meaningful error message from response
+    let errorMessage = `API ${res.status} error`;
+    try {
+      const errorJson = JSON.parse(errorText);
+      // Handle FastAPI error format
+      if (errorJson?.detail) {
+        if (typeof errorJson.detail === 'string') {
+          errorMessage = errorJson.detail;
+        } else if (errorJson.detail?.message) {
+          errorMessage = errorJson.detail.message;
+        } else {
+          errorMessage = JSON.stringify(errorJson.detail);
+        }
+      } else if (errorJson?.message) {
+        errorMessage = errorJson.message;
+      } else if (errorJson?.error) {
+        errorMessage = typeof errorJson.error === 'string' 
+          ? errorJson.error 
+          : JSON.stringify(errorJson.error);
+      }
+    } catch {
+      // If parsing fails, use raw text or status-based message
+      if (res.status === 500) {
+        errorMessage = errorText || 'Internal server error. Please check backend logs.';
+      } else if (res.status === 404) {
+        errorMessage = `Endpoint not found: ${endpoint}`;
+      } else if (res.status === 503 || res.status === 502) {
+        errorMessage = `Backend service unavailable. Please ensure the backend is running on ${BACKEND_BASE_URL}`;
+      } else {
+        errorMessage = errorText || `HTTP ${res.status} error`;
+      }
+    }
+    
+    throw new Error(errorMessage);
   }
 
   const data = await res.json();

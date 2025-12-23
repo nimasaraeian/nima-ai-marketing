@@ -217,6 +217,27 @@
         </div>
     </section>
 
+    <!-- URL Analysis Section -->
+    <section class="modules-section" id="url-analysis">
+        <div class="container">
+            <h2 class="section-title">URL Analysis with Screenshots</h2>
+            <p class="hero-description">
+                Analyze any URL and get detailed insights with desktop and mobile screenshots.
+            </p>
+
+            <form id="urlAnalysisForm" class="module-card" onsubmit="submitUrlAnalysis(event)">
+                <div class="form-group">
+                    <label class="form-label" for="urlAnalysisInput">URL</label>
+                    <input id="urlAnalysisInput" type="url" class="form-input" name="url" placeholder="https://example.com" required />
+                </div>
+
+                <div style="display: flex; gap: 1rem;">
+                    <button type="submit" class="btn btn-primary">Analyze URL</button>
+                </div>
+            </form>
+        </div>
+    </section>
+
     <!-- Visual Trust + Psychology (Pro) Section -->
     <section class="modules-section" id="visual-pro">
         <div class="container">
