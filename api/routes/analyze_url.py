@@ -494,7 +494,7 @@ async def analyze_url(
         "screenshots": {
             "desktop": {
                 "path": Path(debug_path).name if debug_path else None,  # Just filename
-                "url": f"/api/screenshots/{Path(debug_path).name}" if debug_path else None,
+                "url": f"/api/debug_shots/{Path(debug_path).name}" if debug_path else None,
                 "bytes": len(shot),
                 "error": screenshot_error
             } if shot else {
@@ -505,7 +505,7 @@ async def analyze_url(
             },
             "mobile": {
                 "path": Path(debug_path_mobile).name if debug_path_mobile else None,  # Just filename
-                "url": f"/api/screenshots/{Path(debug_path_mobile).name}" if debug_path_mobile else None,
+                "url": f"/api/debug_shots/{Path(debug_path_mobile).name}" if debug_path_mobile else None,
                 "bytes": len(shot_mobile),
                 "error": screenshot_mobile_error
             } if shot_mobile else {
