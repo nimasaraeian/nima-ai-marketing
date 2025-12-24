@@ -4,7 +4,16 @@ from api.schemas.signal_v1 import SignalReportV1
 from api.schemas.decision_v1 import DecisionLogicV1
 
 
+# LEGACY_MODE_ENABLED = False  # DISABLED - use human_report_v2 pipeline instead
+LEGACY_MODE_ENABLED = False
+
 def render_verdict(decision: DecisionLogicV1) -> str:
+    """
+    LEGACY FUNCTION - DISABLED by default.
+    Use human_report_v2 pipeline instead.
+    """
+    if not LEGACY_MODE_ENABLED:
+        return ""  # Legacy generator disabled
     if not decision.blockers:
         return "No major blockers detected. Conversion potential looks solid."
     

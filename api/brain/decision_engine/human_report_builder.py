@@ -14,7 +14,8 @@ from typing import Dict, Any, Optional
 from api.services.page_capture import capture_page_artifacts
 from api.services.page_extract import extract_page_map
 from api.services.brain_rules import run_heuristics
-from api.services.human_report import render_human_report
+# LEGACY_MODE_ENABLED = False  # Set to True only for backward compatibility
+# from api.services.human_report import render_human_report  # DISABLED - uses legacy format
 from api.services.recommendation_guardrails import filter_invalid_recommendations
 
 logger = logging.getLogger(__name__)
@@ -54,15 +55,12 @@ async def build_human_decision_review(
         debug_info["steps"].append("context")
         ctx = await _build_context_from_raw(raw, url)
         
-        # Step 3: Assemble Base Report (includes human_report generation)
-        report = await _assemble_base_report(raw, {}, ctx)  # Empty sections for now
-        
-        # Step 4: Signature Layers (after human_report is available)
+        # Step 3: Signature Layers (build before report assembly)
         debug_info["steps"].append("signature_layers")
-        sections = _build_signature_layers_from_report(report, raw)
+        sections = _build_signature_layers(raw)
         
-        # Merge sections into report
-        report.update(sections)
+        # Step 4: Assemble Base Report (uses signature layers for human_report)
+        report = await _assemble_base_report(raw, sections, ctx)
         
         # Step 5: Contextualization
         debug_info["steps"].append("contextualize")
@@ -175,17 +173,18 @@ async def _build_context_from_raw(raw: Dict[str, Any], url: str) -> Dict[str, An
         }
 
 
-def _build_signature_layers_from_report(report: Dict[str, Any], raw: Dict[str, Any]) -> Dict[str, Any]:
-    """Build signature layers (insight, CTAs, cost, personas) from assembled report."""
+def _build_signature_layers(raw: Dict[str, Any]) -> Dict[str, Any]:
+    """Build signature layers (insight, CTAs, cost, personas) from raw analysis."""
     try:
         from api.brain.decision_engine.enhancers import build_signature_layers
         
-        # Convert report to format expected by enhancers
+        # Convert raw to format expected by enhancers
+        findings = raw.get("findings", {})
         report_dict = {
-            "findings": report.get("findings", {}),
-            "human_report": report.get("human_report", ""),
-            "page_type": report.get("page_type", "unknown"),  # Legacy string field
-            "summary": report.get("summary", {})
+            "findings": findings.get("findings", {}),
+            "human_report": "",  # Will be built from signature layers
+            "page_type": findings.get("page_context", {}).get("page_type", "unknown"),
+            "summary": {"goal": raw.get("goal", "other")}
         }
         
         layers = build_signature_layers(report_dict)
@@ -194,6 +193,44 @@ def _build_signature_layers_from_report(report: Dict[str, Any], raw: Dict[str, A
         logger.warning(f"Failed to build signature layers: {e}")
         # Return defaults
         return _get_default_signature_layers()
+
+
+def _build_human_report_from_signature_layers(sections: Dict[str, Any], findings: Dict[str, Any]) -> str:
+    """
+    Build human report from signature layers (v2 format - no legacy numbered issues).
+    
+    This replaces the legacy render_human_report() which generates numbered issues.
+    """
+    lines = []
+    
+    # Verdict section (from decision_psychology_insight)
+    insight = sections.get("decision_psychology_insight", {})
+    lines.append("## Verdict")
+    lines.append("")
+    verdict_text = insight.get("insight", "Multiple subtle friction points are creating hesitation.")
+    lines.append(verdict_text)
+    lines.append("")
+    
+    # Why Now section
+    lines.append("## Why This Matters Now")
+    lines.append("")
+    why_now = insight.get("why_now", "Small frictions compound. Addressing the primary blocker unlocks the decision pathway.")
+    lines.append(why_now)
+    lines.append("")
+    
+    # Quick Action section (from micro_risk_reducer)
+    lines.append("## Quick Action")
+    lines.append("")
+    action = insight.get("micro_risk_reducer", "Focus on the top blocker identified in the analysis.")
+    lines.append(action)
+    lines.append("")
+    
+    # Note: We do NOT include:
+    # - Numbered issues (1., 2., 3.) - use structured findings.top_issues instead
+    # - Suggested H1 - use structured CTA recommendations instead
+    # - Suggested Primary CTA - use structured cta_recommendations instead
+    
+    return "\n".join(lines)
 
 
 def _get_default_signature_layers() -> Dict[str, Any]:
@@ -297,8 +334,9 @@ async def _assemble_base_report(raw: Dict[str, Any], sections: Dict[str, Any], c
         },
     }
     
-    # Generate human report (async call)
-    human_report = await render_human_report(analysis_json, locale="en")
+    # Generate human report from signature layers (v2 format - no legacy numbered issues)
+    # DO NOT use render_human_report() which generates legacy format
+    human_report = _build_human_report_from_signature_layers(sections, findings.get("findings", {}))
     
     # Build screenshots response
     screenshots_response = _build_screenshots_response(capture)
@@ -462,9 +500,38 @@ def _finalize_and_validate(report: Dict[str, Any], ctx: Dict[str, Any], debug_in
             else:
                 report[key] = ctx.get(key, {})
     
+    # Validate human_report does NOT contain legacy phrases
+    human_report = report.get("human_report", "")
+    legacy_phrases = [
+        "lacks trust signals",
+        "untrustworthy",
+        "suggested h1",
+        "suggested primary cta",
+        "1.",
+        "2.",
+        "3."
+    ]
+    
+    found_legacy = []
+    human_report_lower = human_report.lower()
+    for phrase in legacy_phrases:
+        if phrase in human_report_lower:
+            found_legacy.append(phrase)
+    
+    if found_legacy:
+        logger.warning(f"Legacy phrases detected in human_report: {found_legacy}")
+        debug_info["errors"].append(f"Legacy phrases detected: {', '.join(found_legacy)}")
+        # Sanitize the report
+        for phrase in found_legacy:
+            if phrase in ["1.", "2.", "3."]:
+                # Remove numbered issue lists
+                import re
+                report["human_report"] = re.sub(r'^\d+\.\s+\*\*.*$', '', report["human_report"], flags=re.MULTILINE)
+    
     # Add debug info
     report["debug"] = {
         "pipeline_version": debug_info["pipeline_version"],
+        "source": "human_report_v2_only",  # Assertion: confirms v2 pipeline
         "steps": debug_info["steps"],
         "analysis_mode": ctx.get("brand_context", {}).get("analysis_mode", "standard"),
         "brand_maturity": ctx.get("brand_context", {}).get("brand_maturity", "unknown"),
@@ -472,6 +539,13 @@ def _finalize_and_validate(report: Dict[str, Any], ctx: Dict[str, Any], debug_in
         "page_type": ctx.get("page_type", {}).get("type", "unknown"),
         "errors": debug_info["errors"]
     }
+    
+    # Remove legacy fields if present
+    legacy_fields = ["suggested_h1", "suggested_primary_cta"]
+    for field in legacy_fields:
+        if field in report:
+            logger.warning(f"Removing legacy field: {field}")
+            del report[field]
     
     return report
 

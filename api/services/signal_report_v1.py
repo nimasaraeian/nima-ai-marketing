@@ -6,12 +6,15 @@ from typing import Dict, Any, List
 from api.schemas.signal_v1 import SignalReportV1
 
 
+# LEGACY_MODE_ENABLED = False  # DISABLED - use human_report_v2 pipeline instead
+LEGACY_MODE_ENABLED = False
+
 def generate_human_report_from_v1(signal_report: SignalReportV1) -> Dict[str, Any]:
     """
-    Generate human-readable markdown report from SignalReportV1.
+    LEGACY FUNCTION - DISABLED by default.
     
-    This function converts Phase 1 signals (SignalReportV1) into a human-readable
-    markdown report with verdict, blockers, quick wins, etc.
+    Generate human-readable markdown report from SignalReportV1.
+    This function is disabled in favor of human_report_v2 pipeline.
     
     Args:
         signal_report: SignalReportV1 instance from Phase 1 detection
@@ -21,6 +24,12 @@ def generate_human_report_from_v1(signal_report: SignalReportV1) -> Dict[str, An
         - human_report: markdown string
         - report_meta: {blockers: [ids], quick_wins: [strings]}
     """
+    if not LEGACY_MODE_ENABLED:
+        # Return empty report - legacy generator disabled
+        return {
+            "human_report": "",
+            "report_meta": {"blockers": [], "quick_wins": []}
+        }
     report_lines = []
     blockers = []
     quick_wins = []
