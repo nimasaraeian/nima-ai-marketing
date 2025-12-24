@@ -130,6 +130,7 @@ from api.routes.analyze_url_human import router as analyze_url_human_router
 from api.routes.debug_screenshot import router as debug_screenshot_router
 from api.routes.debug import router as debug_router
 from api.routes.brain_features import router as brain_features_router
+from api.routes.brain_memory import router as brain_memory_router
 from api.routes.explain import router as explain_router
 
 # Import pricing packages
@@ -497,6 +498,7 @@ app.include_router(analyze_url_human_router)
 app.include_router(debug_screenshot_router)
 app.include_router(debug_router)
 app.include_router(brain_features_router)
+app.include_router(brain_memory_router)
 app.include_router(explain_router, prefix="", tags=["Explanation"])
 app.include_router(
     decision_engine_router,
@@ -1360,6 +1362,32 @@ def build_info():
         "railway_service": railway_service,
         "port": os.getenv("PORT", "not_set")
     }
+
+
+@app.get("/api/artifacts/{filename:path}")
+async def serve_artifact(filename: str):
+    """Serve artifact files directly (fallback if StaticFiles mount doesn't work in Railway)."""
+    from fastapi.responses import FileResponse
+    from fastapi import HTTPException
+    
+    file_path = ARTIFACTS_DIR / filename
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Artifact not found: {filename}")
+    
+    # Security: Ensure file is within ARTIFACTS_DIR (prevent directory traversal)
+    try:
+        file_path.resolve().relative_to(ARTIFACTS_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Determine media type based on extension
+    media_type = "image/png" if filename.lower().endswith(".png") else "application/octet-stream"
+    
+    return FileResponse(
+        path=str(file_path),
+        media_type=media_type,
+        filename=filename
+    )
 
 
 @app.get("/api/_health/artifacts")
