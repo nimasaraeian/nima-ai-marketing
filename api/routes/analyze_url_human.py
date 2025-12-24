@@ -179,23 +179,44 @@ async def test_capture_only(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
             base_url = public_base_url.rstrip("/")
         else:
             # Fallback to request-based URL (local development)
-            # Use x-forwarded-proto and host headers for Railway compatibility
-            proto = request.headers.get("x-forwarded-proto", "http")
-            host = request.headers.get("host", "")
-            
-            # Filter out Railway internal domains (they don't work from browser)
-            if host and ".railway.internal" in host:
-                # Try to get Railway public domain from environment
-                railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_STATIC_URL")
-                if railway_domain:
-                    # Remove protocol if present
-                    railway_domain = railway_domain.replace("https://", "").replace("http://", "").rstrip("/")
-                    host = railway_domain
-                else:
-                    # Fallback: remove .railway.internal suffix
-                    host = host.replace(".railway.internal", "")
-            
-            base_url = f"{proto}://{host}" if host else str(request.base_url).rstrip("/")
+            # Use request.url to get the base URL (more reliable than headers)
+            try:
+                # Get base URL from request.url (scheme + netloc only)
+                request_url = request.url
+                base_url = f"{request_url.scheme}://{request_url.netloc}"
+                
+                # Filter out Railway internal domains (they don't work from browser)
+                if ".railway.internal" in base_url:
+                    # Try to get Railway public domain from environment
+                    railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_STATIC_URL")
+                    if railway_domain:
+                        # Remove protocol if present
+                        railway_domain = railway_domain.replace("https://", "").replace("http://", "").rstrip("/")
+                        # Use the scheme from request
+                        base_url = f"{request_url.scheme}://{railway_domain}"
+                    else:
+                        # Fallback: remove .railway.internal suffix
+                        base_url = base_url.replace(".railway.internal", "")
+            except Exception:
+                # Fallback to header-based approach if request.url fails
+                proto = request.headers.get("x-forwarded-proto", "https")
+                host = request.headers.get("host", "")
+                
+                # Extract only hostname (remove path if present)
+                if host:
+                    # Remove any path that might be in host header
+                    host = host.split("/")[0].split(":")[0]
+                
+                # Filter out Railway internal domains
+                if host and ".railway.internal" in host:
+                    railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_STATIC_URL")
+                    if railway_domain:
+                        railway_domain = railway_domain.replace("https://", "").replace("http://", "").rstrip("/")
+                        host = railway_domain
+                    else:
+                        host = host.replace(".railway.internal", "")
+                
+                base_url = f"{proto}://{host}" if host else "https://nima-ai-marketing-production-57b4.up.railway.app"
         
         # Build screenshot URLs for new structure
         screenshots_response = {
@@ -426,23 +447,44 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
             base_url = public_base_url.rstrip("/")
         else:
             # Fallback to request-based URL (local development)
-            # Use x-forwarded-proto and host headers for Railway compatibility
-            proto = request.headers.get("x-forwarded-proto", "http")
-            host = request.headers.get("host", "")
-            
-            # Filter out Railway internal domains (they don't work from browser)
-            if host and ".railway.internal" in host:
-                # Try to get Railway public domain from environment
-                railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_STATIC_URL")
-                if railway_domain:
-                    # Remove protocol if present
-                    railway_domain = railway_domain.replace("https://", "").replace("http://", "").rstrip("/")
-                    host = railway_domain
-                else:
-                    # Fallback: remove .railway.internal suffix
-                    host = host.replace(".railway.internal", "")
-            
-            base_url = f"{proto}://{host}" if host else str(request.base_url).rstrip("/")
+            # Use request.url to get the base URL (more reliable than headers)
+            try:
+                # Get base URL from request.url (scheme + netloc only)
+                request_url = request.url
+                base_url = f"{request_url.scheme}://{request_url.netloc}"
+                
+                # Filter out Railway internal domains (they don't work from browser)
+                if ".railway.internal" in base_url:
+                    # Try to get Railway public domain from environment
+                    railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_STATIC_URL")
+                    if railway_domain:
+                        # Remove protocol if present
+                        railway_domain = railway_domain.replace("https://", "").replace("http://", "").rstrip("/")
+                        # Use the scheme from request
+                        base_url = f"{request_url.scheme}://{railway_domain}"
+                    else:
+                        # Fallback: remove .railway.internal suffix
+                        base_url = base_url.replace(".railway.internal", "")
+            except Exception:
+                # Fallback to header-based approach if request.url fails
+                proto = request.headers.get("x-forwarded-proto", "https")
+                host = request.headers.get("host", "")
+                
+                # Extract only hostname (remove path if present)
+                if host:
+                    # Remove any path that might be in host header
+                    host = host.split("/")[0].split(":")[0]
+                
+                # Filter out Railway internal domains
+                if host and ".railway.internal" in host:
+                    railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_STATIC_URL")
+                    if railway_domain:
+                        railway_domain = railway_domain.replace("https://", "").replace("http://", "").rstrip("/")
+                        host = railway_domain
+                    else:
+                        host = host.replace(".railway.internal", "")
+                
+                base_url = f"{proto}://{host}" if host else "https://nima-ai-marketing-production-57b4.up.railway.app"
         
         # Build screenshot URLs for new structure
         screenshots_response = {
