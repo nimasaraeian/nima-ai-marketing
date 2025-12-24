@@ -471,6 +471,46 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
             "screenshots": screenshots_response
         }
 
+        # Build context (brand maturity + page intent)
+        try:
+            from api.brain.context.brand_context import build_context
+            # Extract page text from capture or human_report
+            page_text = ""
+            if capture and capture.get("dom"):
+                page_text = capture.get("dom", {}).get("readable_text_excerpt", "") or capture.get("dom", {}).get("html_excerpt", "")
+            if not page_text and human_report:
+                page_text = human_report[:5000]  # Use first 5000 chars as fallback
+            
+            context = build_context(str(payload.url), page_text, page_map)
+            
+            # Merge context into response
+            response_data["brand_context"] = context["brand_context"]
+            response_data["page_intent"] = context["page_intent"]
+            response_data["page_type"] = context.get("page_type", {
+                "type": "unknown",
+                "confidence": 0.0
+            })
+        except Exception as e:
+            # Don't fail the request if context detection fails - log and continue
+            logger.warning(f"Failed to build context: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+            # Add default context
+            response_data["brand_context"] = {
+                "brand_maturity": "growth",
+                "confidence": 0.5,
+                "analysis_mode": "standard"
+            }
+            response_data["page_intent"] = {
+                "intent": "unknown",
+                "confidence": 0.5
+            }
+            response_data["page_type"] = {
+                "type": "unknown",
+                "confidence": 0.0
+            }
+            context = response_data  # Use response_data as fallback context
+        
         # Add signature layers (4 new layers: psychology insight, CTA recommendations, cost of inaction, personas)
         try:
             from api.brain.decision_engine.enhancers import build_signature_layers
@@ -480,6 +520,26 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         except Exception as e:
             # Don't fail the request if enhancers fail - log and continue
             logger.warning(f"Failed to build signature layers: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+        
+        # Contextualize verdict for enterprise brands
+        try:
+            from api.brain.decision_engine.contextualizer import contextualize_verdict
+            response_data = contextualize_verdict(response_data, context)
+        except Exception as e:
+            # Don't fail the request if contextualizer fails - log and continue
+            logger.warning(f"Failed to contextualize verdict: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+        
+        # Apply page-type-specific templates
+        try:
+            from api.brain.decision_engine.templates_by_type import apply_page_type_templates
+            response_data = apply_page_type_templates(response_data, context)
+        except Exception as e:
+            # Don't fail the request if templates fail - log and continue
+            logger.warning(f"Failed to apply page type templates: {e}")
             import traceback
             logger.debug(traceback.format_exc())
 
