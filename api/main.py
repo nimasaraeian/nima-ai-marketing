@@ -528,7 +528,8 @@ app.include_router(analyze_url_human_router)
 app.include_router(debug_screenshot_router)
 app.include_router(debug_router)
 app.include_router(brain_features_router)
-app.include_router(brain_memory_router)
+if brain_memory_router:
+    app.include_router(brain_memory_router)
 app.include_router(explain_router, prefix="", tags=["Explanation"])
 app.include_router(
     decision_engine_router,
