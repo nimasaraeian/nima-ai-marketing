@@ -22,6 +22,7 @@ from api.services.page_capture import capture_page_artifacts
 from api.services.page_extract import extract_page_map
 from api.services.brain_rules import run_heuristics
 from api.services.human_report import render_human_report
+from api.memory.brain_memory import log_analysis
 
 router = APIRouter()
 
@@ -257,15 +258,58 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         page_map = extract_page_map(capture)
         print(f"[analyze_url_human] Extracted {len(page_map.get('headlines', []))} headlines, {len(page_map.get('ctas', []))} CTAs")
         
-        # Step 3: Run heuristics
+        # Step 3: Run heuristics (with page type detection)
         print("[analyze_url_human] Step 3: Running heuristics...")
         findings = run_heuristics(
             capture,
             page_map,
             goal=payload.goal,
-            locale=payload.locale
+            locale=payload.locale,
+            url=str(payload.url)  # Pass URL for page type detection
         )
         print(f"[analyze_url_human] Found {len(findings.get('findings', {}).get('top_issues', []))} issues")
+        
+        # Extract page type and analysis scope
+        page_type = findings.get("page_context", {}).get("page_type", "unknown")
+        analysis_scope = findings.get("analysis_scope", "ruleset:unknown")
+        print(f"[analyze_url_human] Detected page type: {page_type}, analysis scope: {analysis_scope}")
+        
+        # Apply guardrails to filter invalid recommendations
+        from api.services.recommendation_guardrails import filter_invalid_recommendations
+        findings_filtered = findings.copy()
+        findings_filtered["findings"] = filter_invalid_recommendations(
+            findings.get("findings", {}),
+            page_type,
+            page_map
+        )
+        findings = findings_filtered
+        print(f"[analyze_url_human] Applied guardrails, filtered findings")
+        
+        # Enforce max 3 issues: rank by impact_score or severity, keep top 3
+        findings_dict = findings.get("findings", {})
+        top_issues = findings_dict.get("top_issues", [])
+        if isinstance(top_issues, list) and len(top_issues) > 3:
+            # Rank issues by impact_score (if available) or severity score
+            def get_sort_key(issue: Dict[str, Any]) -> float:
+                if not isinstance(issue, dict):
+                    return 0.0
+                # Prefer impact_score if available
+                if "impact_score" in issue:
+                    return float(issue.get("impact_score", 0.0))
+                # Fall back to final_severity_score
+                if "final_severity_score" in issue:
+                    return float(issue.get("final_severity_score", 0.0))
+                # Fall back to severity mapping
+                severity_map = {"high": 3.0, "medium": 2.0, "low": 1.0}
+                severity = str(issue.get("severity", "medium")).lower()
+                return severity_map.get(severity, 2.0)
+            
+            # Sort descending by impact/severity
+            top_issues_sorted = sorted(top_issues, key=get_sort_key, reverse=True)
+            # Keep only top 3
+            findings_dict["top_issues"] = top_issues_sorted[:3]
+            findings["findings"] = findings_dict
+            print(f"[analyze_url_human] Ranked and filtered to top 3 issues (from {len(top_issues)} total)")
         
         # Step 4: Build analysis JSON
         print("[analyze_url_human] Step 4: Building analysis JSON...")
@@ -391,6 +435,8 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         response_data = {
             "analysisStatus": "ok",
             "human_report": human_report,
+            "page_type": page_type,  # Detected page type
+            "analysis_scope": analysis_scope,  # Ruleset used for analysis
             "summary": {
                 "url": str(payload.url),
                 "goal": payload.goal,
@@ -414,6 +460,31 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
             # Add public screenshots URLs at root level for easy access (new structure)
             "screenshots": screenshots_response
         }
+
+        # Write analysis memory (Decision Brain memory)
+        try:
+            import hashlib
+
+            top_issues = findings.get("findings", {}).get("top_issues", [])
+            screenshots_for_memory = {
+                "desktop_atf": screenshots_response.get("desktop", {}).get("above_the_fold"),
+                "mobile_atf": screenshots_response.get("mobile", {}).get("above_the_fold"),
+            }
+            report_hash = hashlib.sha256((human_report or "").encode("utf-8")).hexdigest()
+
+            analysis_id = log_analysis(
+                url=str(payload.url),
+                page_type=page_type,
+                ruleset_version=analysis_scope,
+                top_issues=top_issues,
+                screenshots=screenshots_for_memory,
+                decision_probability=None,
+                report_hash=report_hash,
+            )
+            response_data["analysis_id"] = analysis_id
+        except Exception as e:
+            # Memory failures must never break the main analysis path
+            logger.warning(f"[analyze_url_human] Failed to log analysis memory: {e}")
         
         return response_data
         
@@ -473,4 +544,122 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
             status_code=500,
             detail=f"{error_type}: {error_message}"
         )
+
+
+@router.post("/api/analyze/url-human/regression-test")
+async def regression_test_endpoint(request: FastAPIRequest) -> Dict[str, Any]:
+    """
+    Regression test endpoint (local only) that tests 3 URLs and reports:
+    - page_type
+    - top_issues IDs
+    - forbidden suggestions count
+    
+    URLs tested:
+    - https://nekrasgroup.com/
+    - https://www.digikala.com/
+    - https://stripe.com/pricing
+    """
+    import os
+    from api.services.recommendation_guardrails import count_forbidden_suggestions
+    
+    # Only allow in local development
+    host = request.headers.get("host", "")
+    if "localhost" not in host and "127.0.0.1" not in host:
+        raise HTTPException(
+            status_code=403,
+            detail="Regression test endpoint is only available in local development"
+        )
+    
+    test_urls = [
+        "https://nekrasgroup.com/",
+        "https://www.digikala.com/",
+        "https://stripe.com/pricing"
+    ]
+    
+    results = []
+    
+    for url in test_urls:
+        try:
+            print(f"[regression_test] Testing: {url}")
+            
+            # Capture page
+            capture = await capture_page_artifacts(url)
+            
+            # Extract page structure
+            page_map = extract_page_map(capture)
+            
+            # Run heuristics
+            findings = run_heuristics(
+                capture,
+                page_map,
+                goal="leads",
+                locale="en",
+                url=url
+            )
+            
+            # Get page type
+            page_type = findings.get("page_context", {}).get("page_type", "unknown")
+            analysis_scope = findings.get("analysis_scope", "ruleset:unknown")
+            
+            # Get top issues IDs
+            top_issues = findings.get("findings", {}).get("top_issues", [])
+            issue_ids = [
+                issue.get("id") 
+                for issue in top_issues 
+                if isinstance(issue, dict) and issue.get("id")
+            ]
+            
+            # Count forbidden suggestions
+            forbidden_counts = count_forbidden_suggestions(
+                findings.get("findings", {}),
+                page_type,
+                page_map
+            )
+            
+            results.append({
+                "url": url,
+                "page_type": page_type,
+                "analysis_scope": analysis_scope,
+                "top_issues_ids": issue_ids,
+                "forbidden_suggestions": forbidden_counts,
+                "status": "success"
+            })
+            
+            print(f"[regression_test] ✓ {url}: {page_type}, {len(issue_ids)} issues, {forbidden_counts['total_filtered']} filtered")
+            
+        except Exception as e:
+            print(f"[regression_test] ✗ {url}: Error - {str(e)}")
+            results.append({
+                "url": url,
+                "page_type": None,
+                "analysis_scope": None,
+                "top_issues_ids": [],
+                "forbidden_suggestions": {},
+                "status": "error",
+                "error": str(e)
+            })
+    
+    # Print summary
+    print("\n" + "="*60)
+    print("REGRESSION TEST SUMMARY")
+    print("="*60)
+    for result in results:
+        print(f"\nURL: {result['url']}")
+        print(f"  Page Type: {result['page_type']}")
+        print(f"  Analysis Scope: {result['analysis_scope']}")
+        print(f"  Top Issues IDs: {result['top_issues_ids']}")
+        print(f"  Forbidden Suggestions Filtered: {result['forbidden_suggestions'].get('total_filtered', 0)}")
+        if result['status'] == "error":
+            print(f"  ERROR: {result.get('error', 'Unknown error')}")
+    print("\n" + "="*60)
+    
+    return {
+        "test_status": "completed",
+        "results": results,
+        "summary": {
+            "total_tested": len(test_urls),
+            "successful": len([r for r in results if r['status'] == 'success']),
+            "failed": len([r for r in results if r['status'] == 'error'])
+        }
+    }
 

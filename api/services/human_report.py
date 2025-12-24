@@ -31,32 +31,44 @@ PROMPT_EN = """You are a Conversion & Decision UX Auditor.
 
 CRITICAL LANGUAGE RULE: You MUST write ONLY in English. Persian, Farsi, Arabic, or any non-English language is FORBIDDEN.
 
-SPECIFICITY REQUIREMENTS:
+OUTPUT STRUCTURE REQUIREMENTS:
 
-1. QUOTE ACTUAL PAGE ELEMENTS:
-   - Always quote the detected H1 headline exactly as it appears on the page (use quotes: "H1 text here")
-   - Always quote the top 2 CTA labels exactly as they appear (use quotes: "CTA text here")
-   - Reference specific elements found in page_map.headlines and page_map.ctas
+1. VERDICT (First Section):
+   - Start with "## Verdict" heading
+   - Exactly 1-2 sentences (hard limit)
+   - Must answer: why users hesitate in first 5 seconds
+   - No extra context, no page type mentions
+   - Focus on emotional/cognitive hesitation only
+   - Example: "Users hesitate because the page feels untrustworthy and unclear within the first seconds."
 
-2. LOCATION SPECIFICITY:
-   - For each issue, specify if it's "Above-the-Fold" or "Below-the-Fold"
-   - Use the capture.viewport information to determine fold position
-   - If an issue relates to the H1 or primary CTA, it's likely Above-the-Fold
-   - If an issue relates to secondary CTAs or lower content, it's likely Below-the-Fold
+2. MAIN ISSUES (Maximum 3):
+   - List exactly 3 issues (numbered 1, 2, 3)
+   - If fewer than 3 issues exist in findings.top_issues, list only those
+   - Each issue MUST have exactly 2 lines separated by newline:
+     * Line 1 (why_it_blocks): Maximum 16 words explaining why it blocks decisions. Example: "Trust signals are missing, increasing perceived risk and delaying decisions."
+     * Line 2 (fix): Maximum 16 words with action-oriented fix. Example: "Add testimonials or client logos near the CTA."
+   - HARD LIMIT: Count words carefully. If text exceeds 16 words, truncate or re-summarize to exactly 16 words or less.
+   - Quote actual page elements when relevant (H1, CTA text)
+   - Format: "1. [why_it_blocks]\n   [fix]"
 
-3. PAGE-SPECIFIC RECOMMENDATIONS:
-   - Replace generic advice with specific recommendations referencing actual elements
-   - Instead of "improve your headline", say "Change 'Current H1 Text' to [specific suggestion]"
-   - Instead of "make CTA clearer", say "Replace 'Current CTA Text' with [specific suggestion]"
-   - Reference actual CTA labels and headlines found in the page_map
+3. QUICK WINS (Exactly 3):
+   - List exactly 3 quick wins (no more, no less)
+   - Each must be: action verb + concrete UI/copy/trust change
+   - Executable in under 30 minutes
+   - No generic advice
+
+4. SUGGESTED COPY:
+   - One H1 suggestion
+   - One Primary CTA suggestion
+   - Outcome-driven and action-oriented
+
+5. IMPLEMENTATION CHECKLIST:
+   - Max 3-4 binary checklist items (checkbox style)
+   - No explanations, no sub-points
 
 Do not use numbers, scores, percentages, confidence, or unnecessary technical jargon.
-
-Only actionable problems. If there is insufficient evidence, honestly say "insufficient evidence".
-
-Output must include: 3 main issues (numbered 1, 2, 3) + 5 Quick Wins + suggested copy (Headline/CTA) + implementation checklist.
-
-CRITICAL: The number of main issues you list MUST match the number of issues in findings.top_issues. Count the issues in the JSON data and list exactly that many (not more, not less).
+Do NOT include "Page Type:" section in the report.
+Start directly with Verdict section.
 
 ALL OUTPUT MUST BE IN ENGLISH. Any non-English characters (especially Persian/Farsi Unicode range \\u0600-\\u06FF) will cause the system to fail.
 """
@@ -165,8 +177,28 @@ async def render_human_report(analysis_json: Dict[str, Any], locale: str = "en")
         
         context_section = "\n".join(context_lines) if context_lines else "No specific elements detected."
         
+        # Get page type and analysis scope
+        page_context = analysis_json.get("page_context", {})
+        page_type = page_context.get("page_type") or page_context.get("page_type_guess", "unknown")
+        
+        # Generate page type description sentence
+        page_type_descriptions = {
+            "service_landing": "This analysis is tailored for a service landing page.",
+            "saas_landing": "This analysis is tailored for a SaaS landing page.",
+            "ecommerce_marketplace": "This analysis is tailored for an e-commerce marketplace homepage.",
+            "content_site": "This analysis is tailored for a content site.",
+            "brand_homepage": "This analysis is tailored for a brand homepage."
+        }
+        page_type_sentence = page_type_descriptions.get(page_type, "This analysis is tailored for the detected page type.")
+        
+        # Count issues to ensure max 3
+        top_issues = analysis_json.get("findings", {}).get("top_issues", [])
+        issues_count = len(top_issues) if isinstance(top_issues, list) else 0
+        max_issues = min(3, issues_count)
+        
         user_prompt = f"""Page Goal: {analysis_json.get("input", {}).get("goal")}
 URL: {analysis_json.get("input", {}).get("url")}
+Page Type: {page_type} (for context only, do NOT include in report)
 
 DETECTED PAGE ELEMENTS:
 {context_section}
@@ -178,10 +210,18 @@ FULL ANALYSIS DATA:
 
 {PROMPT_EN}
 
-CRITICAL: 
-- Quote the H1 and top 2 CTAs exactly as shown above
-- Specify Above-the-Fold vs Below-the-Fold for each issue
-- Make recommendations specific to the actual elements found (not generic advice)
+CRITICAL REQUIREMENTS: 
+- Start DIRECTLY with "## Verdict" section (NO "Page Type:" header anywhere in report)
+- Verdict: Exactly 1-2 sentences (hard limit) explaining why users hesitate in first 5 seconds
+- Main Issues: List exactly {max_issues} issues (numbered 1, 2, 3)
+  * Each issue format: "N. [why_it_blocks - max 16 words]\n   [fix - max 16 words]"
+  * COUNT WORDS CAREFULLY - truncate if exceeds 16 words per line
+- Quick Wins: Exactly 3 items (numbered with dashes: "- Action verb + concrete UI/copy/trust change")
+- Quote the H1 and top 2 CTAs exactly as shown above when relevant
+- Make recommendations specific to actual elements found
+- Ensure recommendations are appropriate for {page_type} page type
+- Do NOT suggest consultation CTAs for e-commerce marketplaces
+- Do NOT suggest H1 changes if no H1 was detected
 
 Write the report in English. Do not use numbers or percentages. Any non-English output will be rejected."""
         
