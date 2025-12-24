@@ -22,7 +22,12 @@ from api.services.page_capture import capture_page_artifacts
 from api.services.page_extract import extract_page_map
 from api.services.brain_rules import run_heuristics
 from api.services.human_report import render_human_report
-from api.memory.brain_memory import log_analysis
+
+# Optional import for memory logging (may not be available in all environments)
+try:
+    from api.memory.brain_memory import log_analysis
+except ImportError:
+    log_analysis = None
 
 router = APIRouter()
 
@@ -472,16 +477,20 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
             }
             report_hash = hashlib.sha256((human_report or "").encode("utf-8")).hexdigest()
 
-            analysis_id = log_analysis(
-                url=str(payload.url),
-                page_type=page_type,
-                ruleset_version=analysis_scope,
-                top_issues=top_issues,
-                screenshots=screenshots_for_memory,
-                decision_probability=None,
-                report_hash=report_hash,
-            )
-            response_data["analysis_id"] = analysis_id
+            # Log analysis to memory if available (optional feature)
+            analysis_id = None
+            if log_analysis:
+                analysis_id = log_analysis(
+                    url=str(payload.url),
+                    page_type=page_type,
+                    ruleset_version=analysis_scope,
+                    top_issues=top_issues,
+                    screenshots=screenshots_for_memory,
+                    decision_probability=None,
+                    report_hash=report_hash,
+                )
+            if analysis_id:
+                response_data["analysis_id"] = analysis_id
         except Exception as e:
             # Memory failures must never break the main analysis path
             logger.warning(f"[analyze_url_human] Failed to log analysis memory: {e}")
