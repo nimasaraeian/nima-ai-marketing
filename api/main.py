@@ -213,9 +213,22 @@ async def serve_artifact(filename: str):
     """Serve artifact files directly (works better than StaticFiles mount in Railway)."""
     from fastapi.responses import FileResponse
     from fastapi import HTTPException
+    import logging
+    
+    logger = logging.getLogger("artifacts")
     
     file_path = ARTIFACTS_DIR / filename
+    
+    # Log for debugging
+    logger.info(f"Artifact request: {filename}, path: {file_path}, exists: {file_path.exists()}")
+    
     if not file_path.exists() or not file_path.is_file():
+        # Log available files for debugging
+        try:
+            available_files = list(ARTIFACTS_DIR.glob("*.png"))[-5:]  # Last 5 files
+            logger.warning(f"Artifact not found: {filename}. Available files: {[f.name for f in available_files]}")
+        except Exception as e:
+            logger.error(f"Error listing artifacts: {e}")
         raise HTTPException(status_code=404, detail=f"Artifact not found: {filename}")
     
     # Security: Ensure file is within ARTIFACTS_DIR (prevent directory traversal)
@@ -226,6 +239,8 @@ async def serve_artifact(filename: str):
     
     # Determine media type based on extension
     media_type = "image/png" if filename.lower().endswith(".png") else "application/octet-stream"
+    
+    logger.info(f"Serving artifact: {filename}, size: {file_path.stat().st_size} bytes")
     
     return FileResponse(
         path=str(file_path),
