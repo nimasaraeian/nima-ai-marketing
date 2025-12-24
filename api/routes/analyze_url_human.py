@@ -181,7 +181,20 @@ async def test_capture_only(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
             # Fallback to request-based URL (local development)
             # Use x-forwarded-proto and host headers for Railway compatibility
             proto = request.headers.get("x-forwarded-proto", "http")
-            host = request.headers.get("host")
+            host = request.headers.get("host", "")
+            
+            # Filter out Railway internal domains (they don't work from browser)
+            if host and ".railway.internal" in host:
+                # Try to get Railway public domain from environment
+                railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_STATIC_URL")
+                if railway_domain:
+                    # Remove protocol if present
+                    railway_domain = railway_domain.replace("https://", "").replace("http://", "").rstrip("/")
+                    host = railway_domain
+                else:
+                    # Fallback: remove .railway.internal suffix
+                    host = host.replace(".railway.internal", "")
+            
             base_url = f"{proto}://{host}" if host else str(request.base_url).rstrip("/")
         
         # Build screenshot URLs for new structure
@@ -415,7 +428,20 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
             # Fallback to request-based URL (local development)
             # Use x-forwarded-proto and host headers for Railway compatibility
             proto = request.headers.get("x-forwarded-proto", "http")
-            host = request.headers.get("host")
+            host = request.headers.get("host", "")
+            
+            # Filter out Railway internal domains (they don't work from browser)
+            if host and ".railway.internal" in host:
+                # Try to get Railway public domain from environment
+                railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_STATIC_URL")
+                if railway_domain:
+                    # Remove protocol if present
+                    railway_domain = railway_domain.replace("https://", "").replace("http://", "").rstrip("/")
+                    host = railway_domain
+                else:
+                    # Fallback: remove .railway.internal suffix
+                    host = host.replace(".railway.internal", "")
+            
             base_url = f"{proto}://{host}" if host else str(request.base_url).rstrip("/")
         
         # Build screenshot URLs for new structure
