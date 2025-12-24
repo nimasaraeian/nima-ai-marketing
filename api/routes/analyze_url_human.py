@@ -383,30 +383,25 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
             (ARTIFACTS_DIR / mobile_full_filename if mobile_full_filename else None, "Mobile Full"),
         ]
         
-        verification_errors = []
-        for screenshot_path, name in screenshots_to_check:
-            if screenshot_path and not os.path.exists(str(screenshot_path)):
-                verification_errors.append(f"{name} screenshot missing: {screenshot_path}")
-            elif screenshot_path and os.path.getsize(str(screenshot_path)) == 0:
-                verification_errors.append(f"{name} screenshot is empty: {screenshot_path}")
+        # Verify files exist and clear filenames if they don't (graceful degradation)
+        verified_filenames = {}
+        for key, filename, path, name in [
+            ("desktop_atf", desktop_atf_filename, ARTIFACTS_DIR / desktop_atf_filename if desktop_atf_filename else None, "Desktop ATF"),
+            ("desktop_full", desktop_full_filename, ARTIFACTS_DIR / desktop_full_filename if desktop_full_filename else None, "Desktop Full"),
+            ("mobile_atf", mobile_atf_filename, ARTIFACTS_DIR / mobile_atf_filename if mobile_atf_filename else None, "Mobile ATF"),
+            ("mobile_full", mobile_full_filename, ARTIFACTS_DIR / mobile_full_filename if mobile_full_filename else None, "Mobile Full"),
+        ]:
+            if filename and path and os.path.exists(str(path)) and os.path.getsize(str(path)) > 0:
+                verified_filenames[key] = filename
+            elif filename:
+                logger.warning(f"[analyze_url_human] {name} screenshot missing or empty: {path}")
+                verified_filenames[key] = None
         
-        if verification_errors:
-            error_msg = "; ".join(verification_errors)
-            logger.error(f"[analyze_url_human] Artifact verification failed: {error_msg}")
-            return {
-                "analysisStatus": "error",
-                "url": str(payload.url),
-                "error": {
-                    "message": error_msg,
-                    "stage": "artifact_missing"
-                },
-                "human_report": None,
-                "summary": None,
-                "findings": None,
-                "capture_info": None,
-                "page_map": None,
-                "screenshots": None
-            }
+        # Use verified filenames (None if file doesn't exist)
+        desktop_atf_filename = verified_filenames.get("desktop_atf")
+        desktop_full_filename = verified_filenames.get("desktop_full")
+        mobile_atf_filename = verified_filenames.get("mobile_atf")
+        mobile_full_filename = verified_filenames.get("mobile_full")
         
         # Build base URL - use PUBLIC_BASE_URL if set (production), otherwise fallback to request
         from api.core.config import get_public_base_url
