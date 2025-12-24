@@ -218,6 +218,33 @@ async def test_capture_only(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
                 
                 base_url = f"{proto}://{host}" if host else "https://nima-ai-marketing-production-57b4.up.railway.app"
         
+        # Final verification: Ensure files exist before returning URLs
+        # This helps catch issues early and provides better error messages
+        from api.paths import ARTIFACTS_DIR
+        verification_issues = []
+        
+        if desktop_atf_filename:
+            desktop_atf_path = ARTIFACTS_DIR / desktop_atf_filename
+            if not desktop_atf_path.exists():
+                verification_issues.append(f"Desktop ATF file not found: {desktop_atf_path}")
+        if desktop_full_filename:
+            desktop_full_path = ARTIFACTS_DIR / desktop_full_filename
+            if not desktop_full_path.exists():
+                verification_issues.append(f"Desktop Full file not found: {desktop_full_path}")
+        if mobile_atf_filename:
+            mobile_atf_path = ARTIFACTS_DIR / mobile_atf_filename
+            if not mobile_atf_path.exists():
+                verification_issues.append(f"Mobile ATF file not found: {mobile_atf_path}")
+        if mobile_full_filename:
+            mobile_full_path = ARTIFACTS_DIR / mobile_full_filename
+            if not mobile_full_path.exists():
+                verification_issues.append(f"Mobile Full file not found: {mobile_full_path}")
+        
+        if verification_issues:
+            logger.error(f"File verification failed: {', '.join(verification_issues)}")
+            logger.error(f"Artifacts directory: {ARTIFACTS_DIR}, exists: {ARTIFACTS_DIR.exists()}")
+            # Don't fail the request, but log the issue - files might exist on a different instance
+        
         # Build screenshot URLs for new structure
         screenshots_response = {
             "desktop": {
@@ -485,6 +512,33 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
                         host = host.replace(".railway.internal", "")
                 
                 base_url = f"{proto}://{host}" if host else "https://nima-ai-marketing-production-57b4.up.railway.app"
+        
+        # Final verification: Ensure files exist before returning URLs
+        # This helps catch issues early and provides better error messages
+        from api.paths import ARTIFACTS_DIR
+        verification_issues = []
+        
+        if desktop_atf_filename:
+            desktop_atf_path = ARTIFACTS_DIR / desktop_atf_filename
+            if not desktop_atf_path.exists():
+                verification_issues.append(f"Desktop ATF file not found: {desktop_atf_path}")
+        if desktop_full_filename:
+            desktop_full_path = ARTIFACTS_DIR / desktop_full_filename
+            if not desktop_full_path.exists():
+                verification_issues.append(f"Desktop Full file not found: {desktop_full_path}")
+        if mobile_atf_filename:
+            mobile_atf_path = ARTIFACTS_DIR / mobile_atf_filename
+            if not mobile_atf_path.exists():
+                verification_issues.append(f"Mobile ATF file not found: {mobile_atf_path}")
+        if mobile_full_filename:
+            mobile_full_path = ARTIFACTS_DIR / mobile_full_filename
+            if not mobile_full_path.exists():
+                verification_issues.append(f"Mobile Full file not found: {mobile_full_path}")
+        
+        if verification_issues:
+            logger.error(f"File verification failed: {', '.join(verification_issues)}")
+            logger.error(f"Artifacts directory: {ARTIFACTS_DIR}, exists: {ARTIFACTS_DIR.exists()}")
+            # Don't fail the request, but log the issue - files might exist on a different instance
         
         # Build screenshot URLs for new structure
         screenshots_response = {

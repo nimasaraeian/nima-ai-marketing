@@ -214,33 +214,75 @@ async def serve_artifact(filename: str):
     from fastapi.responses import FileResponse
     from fastapi import HTTPException
     import logging
+    import os
     
     logger = logging.getLogger("artifacts")
     
-    file_path = ARTIFACTS_DIR / filename
+    # Ensure artifacts directory exists
+    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
     
-    # Log for debugging
-    logger.info(f"Artifact request: {filename}, path: {file_path}, exists: {file_path.exists()}")
+    # Resolve to absolute path to ensure consistency
+    artifacts_dir_abs = ARTIFACTS_DIR.resolve()
+    file_path = artifacts_dir_abs / filename
+    
+    # Log for debugging with full path information
+    logger.info(
+        f"Artifact request: filename={filename}, "
+        f"resolved_path={file_path}, "
+        f"exists={file_path.exists()}, "
+        f"artifacts_dir={artifacts_dir_abs}, "
+        f"cwd={os.getcwd()}"
+    )
     
     if not file_path.exists() or not file_path.is_file():
         # Log available files for debugging
         try:
-            available_files = list(ARTIFACTS_DIR.glob("*.png"))[-5:]  # Last 5 files
-            logger.warning(f"Artifact not found: {filename}. Available files: {[f.name for f in available_files]}")
+            # Get all PNG files, sorted by modification time (newest first)
+            all_files = list(artifacts_dir_abs.glob("*.png"))
+            available_files = sorted(all_files, key=lambda x: x.stat().st_mtime if x.exists() else 0, reverse=True)[:10]
+            available_names = [f.name for f in available_files]
+            logger.warning(
+                f"Artifact not found: {filename}. "
+                f"Artifacts dir exists: {artifacts_dir_abs.exists()}, "
+                f"is_dir: {artifacts_dir_abs.is_dir() if artifacts_dir_abs.exists() else False}, "
+                f"total_files: {len(all_files)}, "
+                f"recent_files: {available_names}"
+            )
         except Exception as e:
-            logger.error(f"Error listing artifacts: {e}")
-        raise HTTPException(status_code=404, detail=f"Artifact not found: {filename}")
+            logger.error(f"Error listing artifacts: {e}", exc_info=True)
+        
+        # Provide helpful error message
+        error_detail = {
+            "error": "Artifact not found",
+            "filename": filename,
+            "resolved_path": str(file_path),
+            "artifacts_dir": str(artifacts_dir_abs),
+            "artifacts_dir_exists": artifacts_dir_abs.exists(),
+            "hint": "File may not have been saved yet, or Railway's ephemeral filesystem may have cleared it."
+        }
+        raise HTTPException(status_code=404, detail=error_detail)
     
     # Security: Ensure file is within ARTIFACTS_DIR (prevent directory traversal)
     try:
-        file_path.resolve().relative_to(ARTIFACTS_DIR.resolve())
+        file_path.resolve().relative_to(artifacts_dir_abs)
     except ValueError:
+        logger.error(f"Directory traversal attempt detected: {filename}")
         raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Check file is readable
+    try:
+        file_size = file_path.stat().st_size
+        if file_size == 0:
+            logger.warning(f"Artifact file is empty: {filename}")
+            raise HTTPException(status_code=404, detail="Artifact file is empty")
+    except OSError as e:
+        logger.error(f"Cannot access artifact file: {filename}, error: {e}")
+        raise HTTPException(status_code=404, detail=f"Cannot access artifact file: {str(e)}")
     
     # Determine media type based on extension
     media_type = "image/png" if filename.lower().endswith(".png") else "application/octet-stream"
     
-    logger.info(f"Serving artifact: {filename}, size: {file_path.stat().st_size} bytes")
+    logger.info(f"Serving artifact: {filename}, size: {file_size} bytes")
     
     return FileResponse(
         path=str(file_path),
