@@ -197,13 +197,39 @@ app = FastAPI(title="Nima AI Brain API", version="1.0.0")
 # Canonical uvicorn command (for documentation):
 # uvicorn api.main:app --host 0.0.0.0 --port $PORT
 
-# IMMEDIATELY after app creation: Set up static file mounts
-# This ensures mounts are registered before any routers
+# IMMEDIATELY after app creation: Set up route handlers and static file mounts
+# Route handlers must be defined BEFORE mounts so they take precedence
 from fastapi.staticfiles import StaticFiles
 from api.paths import ARTIFACTS_DIR, DEBUG_SHOTS_DIR
 
-# Mount static file directories
-# IMPORTANT: Mounts MUST be defined BEFORE include_router calls to avoid route conflicts
+# Define route handler for artifacts BEFORE mount (so it takes precedence over StaticFiles)
+@app.get("/api/artifacts/{filename:path}")
+async def serve_artifact(filename: str):
+    """Serve artifact files directly (works better than StaticFiles mount in Railway)."""
+    from fastapi.responses import FileResponse
+    from fastapi import HTTPException
+    
+    file_path = ARTIFACTS_DIR / filename
+    if not file_path.exists() or not file_path.is_file():
+        raise HTTPException(status_code=404, detail=f"Artifact not found: {filename}")
+    
+    # Security: Ensure file is within ARTIFACTS_DIR (prevent directory traversal)
+    try:
+        file_path.resolve().relative_to(ARTIFACTS_DIR.resolve())
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Access denied")
+    
+    # Determine media type based on extension
+    media_type = "image/png" if filename.lower().endswith(".png") else "application/octet-stream"
+    
+    return FileResponse(
+        path=str(file_path),
+        media_type=media_type,
+        filename=filename
+    )
+
+# Mount static file directories (fallback if route handler doesn't match)
+# IMPORTANT: Mounts MUST be defined AFTER route handlers but BEFORE include_router calls
 app.mount("/api/artifacts", StaticFiles(directory=str(ARTIFACTS_DIR)), name="artifacts")
 app.mount("/api/debug_shots", StaticFiles(directory=str(DEBUG_SHOTS_DIR)), name="debug_shots")
 
