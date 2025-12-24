@@ -1364,32 +1364,6 @@ def build_info():
     }
 
 
-@app.get("/api/artifacts/{filename:path}")
-async def serve_artifact(filename: str):
-    """Serve artifact files directly (fallback if StaticFiles mount doesn't work in Railway)."""
-    from fastapi.responses import FileResponse
-    from fastapi import HTTPException
-    
-    file_path = ARTIFACTS_DIR / filename
-    if not file_path.exists() or not file_path.is_file():
-        raise HTTPException(status_code=404, detail=f"Artifact not found: {filename}")
-    
-    # Security: Ensure file is within ARTIFACTS_DIR (prevent directory traversal)
-    try:
-        file_path.resolve().relative_to(ARTIFACTS_DIR.resolve())
-    except ValueError:
-        raise HTTPException(status_code=403, detail="Access denied")
-    
-    # Determine media type based on extension
-    media_type = "image/png" if filename.lower().endswith(".png") else "application/octet-stream"
-    
-    return FileResponse(
-        path=str(file_path),
-        media_type=media_type,
-        filename=filename
-    )
-
-
 @app.get("/api/_health/artifacts")
 def artifacts_health():
     """Health check endpoint for artifacts directory."""
