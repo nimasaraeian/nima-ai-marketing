@@ -131,131 +131,44 @@ async def test_capture_only(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         print(f"[test_capture] Starting capture for: {payload.url}")
         capture = await capture_page_artifacts(str(payload.url))
         
-        # Get screenshot filenames from capture (new structure with desktop and mobile)
+        # Get screenshot data URLs from capture (new structure with desktop and mobile)
         screenshots_raw = capture.get("screenshots", {})
         desktop_screenshots = screenshots_raw.get("desktop", {})
         mobile_screenshots = screenshots_raw.get("mobile", {})
         
-        # Extract filenames
-        desktop_atf_filename = desktop_screenshots.get("above_the_fold")
-        desktop_full_filename = desktop_screenshots.get("full_page")
-        mobile_atf_filename = mobile_screenshots.get("above_the_fold")
-        mobile_full_filename = mobile_screenshots.get("full_page")
+        # Extract data URLs (new approach - no file system dependency)
+        desktop_atf_data_url = desktop_screenshots.get("above_the_fold_data_url")
+        desktop_full_data_url = desktop_screenshots.get("full_page_data_url")
+        mobile_atf_data_url = mobile_screenshots.get("above_the_fold_data_url")
+        mobile_full_data_url = mobile_screenshots.get("full_page_data_url")
         
-        # Post-capture verification: Check files actually exist and are accessible
-        screenshots_to_check = [
-            (ARTIFACTS_DIR / desktop_atf_filename if desktop_atf_filename else None, "Desktop ATF"),
-            (ARTIFACTS_DIR / desktop_full_filename if desktop_full_filename else None, "Desktop Full"),
-            (ARTIFACTS_DIR / mobile_atf_filename if mobile_atf_filename else None, "Mobile ATF"),
-            (ARTIFACTS_DIR / mobile_full_filename if mobile_full_filename else None, "Mobile Full"),
-        ]
+        # Verify data URLs exist
+        if not desktop_atf_data_url or not desktop_atf_data_url.startswith("data:image/png;base64,"):
+            logger.error(f"[test_capture] Desktop ATF data URL missing or invalid")
+        if not desktop_full_data_url or not desktop_full_data_url.startswith("data:image/png;base64,"):
+            logger.error(f"[test_capture] Desktop Full data URL missing or invalid")
+        if not mobile_atf_data_url or not mobile_atf_data_url.startswith("data:image/png;base64,"):
+            logger.error(f"[test_capture] Mobile ATF data URL missing or invalid")
+        if not mobile_full_data_url or not mobile_full_data_url.startswith("data:image/png;base64,"):
+            logger.error(f"[test_capture] Mobile Full data URL missing or invalid")
         
-        verification_errors = []
-        for screenshot_path, name in screenshots_to_check:
-            if screenshot_path and not os.path.exists(str(screenshot_path)):
-                verification_errors.append(f"{name} screenshot missing: {screenshot_path}")
-            elif screenshot_path and os.path.getsize(str(screenshot_path)) == 0:
-                verification_errors.append(f"{name} screenshot is empty: {screenshot_path}")
-        
-        if verification_errors:
-            error_msg = "; ".join(verification_errors)
-            logger.error(f"[test_capture] Artifact verification failed: {error_msg}")
-            return {
-                "analysisStatus": "error",
-                "url": payload.url,
-                "error": {
-                    "message": error_msg,
-                    "stage": "artifact_missing"
-                },
-                "capture": None
-            }
-        
-        # Build base URL - use PUBLIC_BASE_URL if set (production), otherwise fallback to request
-        from api.core.config import get_public_base_url
-        public_base_url = get_public_base_url()
-        
-        if public_base_url:
-            # Use PUBLIC_BASE_URL (production)
-            base_url = public_base_url.rstrip("/")
-        else:
-            # Fallback to request-based URL (local development)
-            # Use request.url to get the base URL (more reliable than headers)
-            try:
-                # Get base URL from request.url (scheme + netloc only)
-                request_url = request.url
-                base_url = f"{request_url.scheme}://{request_url.netloc}"
-                
-                # Filter out Railway internal domains (they don't work from browser)
-                if ".railway.internal" in base_url:
-                    # Try to get Railway public domain from environment
-                    railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_STATIC_URL")
-                    if railway_domain:
-                        # Remove protocol if present
-                        railway_domain = railway_domain.replace("https://", "").replace("http://", "").rstrip("/")
-                        # Use the scheme from request
-                        base_url = f"{request_url.scheme}://{railway_domain}"
-                    else:
-                        # Fallback: remove .railway.internal suffix
-                        base_url = base_url.replace(".railway.internal", "")
-            except Exception:
-                # Fallback to header-based approach if request.url fails
-                proto = request.headers.get("x-forwarded-proto", "https")
-                host = request.headers.get("host", "")
-                
-                # Extract only hostname (remove path if present)
-                if host:
-                    # Remove any path that might be in host header
-                    host = host.split("/")[0].split(":")[0]
-                
-                # Filter out Railway internal domains
-                if host and ".railway.internal" in host:
-                    railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_STATIC_URL")
-                    if railway_domain:
-                        railway_domain = railway_domain.replace("https://", "").replace("http://", "").rstrip("/")
-                        host = railway_domain
-                    else:
-                        host = host.replace(".railway.internal", "")
-                
-                base_url = f"{proto}://{host}" if host else "https://nima-ai-marketing-production-57b4.up.railway.app"
-        
-        # Final verification: Ensure files exist before returning URLs
-        # This helps catch issues early and provides better error messages
-        from api.paths import ARTIFACTS_DIR
-        verification_issues = []
-        
-        if desktop_atf_filename:
-            desktop_atf_path = ARTIFACTS_DIR / desktop_atf_filename
-            if not desktop_atf_path.exists():
-                verification_issues.append(f"Desktop ATF file not found: {desktop_atf_path}")
-        if desktop_full_filename:
-            desktop_full_path = ARTIFACTS_DIR / desktop_full_filename
-            if not desktop_full_path.exists():
-                verification_issues.append(f"Desktop Full file not found: {desktop_full_path}")
-        if mobile_atf_filename:
-            mobile_atf_path = ARTIFACTS_DIR / mobile_atf_filename
-            if not mobile_atf_path.exists():
-                verification_issues.append(f"Mobile ATF file not found: {mobile_atf_path}")
-        if mobile_full_filename:
-            mobile_full_path = ARTIFACTS_DIR / mobile_full_filename
-            if not mobile_full_path.exists():
-                verification_issues.append(f"Mobile Full file not found: {mobile_full_path}")
-        
-        if verification_issues:
-            logger.error(f"File verification failed: {', '.join(verification_issues)}")
-            logger.error(f"Artifacts directory: {ARTIFACTS_DIR}, exists: {ARTIFACTS_DIR.exists()}")
-            # Don't fail the request, but log the issue - files might exist on a different instance
-        
-        # Build screenshot URLs for new structure
+        # Build screenshot response with data URLs (no file system needed)
         screenshots_response = {
             "desktop": {
-                "above_the_fold": f"{base_url}/api/artifacts/{desktop_atf_filename}" if desktop_atf_filename else None,
-                "full_page": f"{base_url}/api/artifacts/{desktop_full_filename}" if desktop_full_filename else None,
-                "viewport": desktop_screenshots.get("viewport", {"width": 1365, "height": 768})
+                "above_the_fold_data_url": desktop_atf_data_url,
+                "full_page_data_url": desktop_full_data_url,
+                "viewport": desktop_screenshots.get("viewport", {"width": 1365, "height": 768}),
+                # Legacy fields (set to None - no longer used)
+                "above_the_fold": None,
+                "full_page": None,
             },
             "mobile": {
-                "above_the_fold": f"{base_url}/api/artifacts/{mobile_atf_filename}" if mobile_atf_filename else None,
-                "full_page": f"{base_url}/api/artifacts/{mobile_full_filename}" if mobile_full_filename else None,
-                "viewport": mobile_screenshots.get("viewport", {"width": 390, "height": 844})
+                "above_the_fold_data_url": mobile_atf_data_url,
+                "full_page_data_url": mobile_full_data_url,
+                "viewport": mobile_screenshots.get("viewport", {"width": 390, "height": 844}),
+                # Legacy fields (set to None - no longer used)
+                "above_the_fold": None,
+                "full_page": None,
             }
         }
         
@@ -380,6 +293,28 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         
         # Step 4: Build analysis JSON
         print("[analyze_url_human] Step 4: Building analysis JSON...")
+        
+        # Create a lightweight capture object for LLM (remove Base64 data URLs to avoid token limit)
+        # Keep only metadata, not the actual screenshot data
+        capture_for_llm = {}
+        if capture:
+            capture_for_llm = {
+                "timestamp_utc": capture.get("timestamp_utc"),
+                "dom": capture.get("dom", {}),
+                "screenshots": {
+                    "desktop": {
+                        "viewport": capture.get("screenshots", {}).get("desktop", {}).get("viewport", {}),
+                        # Remove data URLs - too large for LLM
+                        "screenshot_available": bool(capture.get("screenshots", {}).get("desktop", {}).get("above_the_fold_data_url"))
+                    },
+                    "mobile": {
+                        "viewport": capture.get("screenshots", {}).get("mobile", {}).get("viewport", {}),
+                        # Remove data URLs - too large for LLM
+                        "screenshot_available": bool(capture.get("screenshots", {}).get("mobile", {}).get("above_the_fold_data_url"))
+                    }
+                }
+            }
+        
         analysis_json = {
             "schema_version": "1.0",
             "input": {
@@ -388,7 +323,7 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
                 "locale": payload.locale
             },
             "page_context": findings.get("page_context", {}),
-            "capture": capture,
+            "capture": capture_for_llm,  # Use lightweight version without Base64 data URLs
             "page_map": page_map,
             "findings": findings.get("findings", {}),
             "output_policy": {
@@ -423,138 +358,84 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         
         print("[analyze_url_human] ✅ Analysis completed successfully")
         
-        # Screenshots now return new structure with desktop and mobile
-        screenshots_raw = capture.get("screenshots", {})
-        desktop_screenshots = screenshots_raw.get("desktop", {})
-        mobile_screenshots = screenshots_raw.get("mobile", {})
-        
-        # Extract filenames
-        desktop_atf_filename = desktop_screenshots.get("above_the_fold")
-        desktop_full_filename = desktop_screenshots.get("full_page")
-        mobile_atf_filename = mobile_screenshots.get("above_the_fold")
-        mobile_full_filename = mobile_screenshots.get("full_page")
-        
-        # Post-capture verification: Check files actually exist and are accessible
-        import os
-        from api.paths import ARTIFACTS_DIR
-        
-        screenshots_to_check = [
-            (ARTIFACTS_DIR / desktop_atf_filename if desktop_atf_filename else None, "Desktop ATF"),
-            (ARTIFACTS_DIR / desktop_full_filename if desktop_full_filename else None, "Desktop Full"),
-            (ARTIFACTS_DIR / mobile_atf_filename if mobile_atf_filename else None, "Mobile ATF"),
-            (ARTIFACTS_DIR / mobile_full_filename if mobile_full_filename else None, "Mobile Full"),
-        ]
-        
-        # Verify files exist and clear filenames if they don't (graceful degradation)
-        verified_filenames = {}
-        for key, filename, path, name in [
-            ("desktop_atf", desktop_atf_filename, ARTIFACTS_DIR / desktop_atf_filename if desktop_atf_filename else None, "Desktop ATF"),
-            ("desktop_full", desktop_full_filename, ARTIFACTS_DIR / desktop_full_filename if desktop_full_filename else None, "Desktop Full"),
-            ("mobile_atf", mobile_atf_filename, ARTIFACTS_DIR / mobile_atf_filename if mobile_atf_filename else None, "Mobile ATF"),
-            ("mobile_full", mobile_full_filename, ARTIFACTS_DIR / mobile_full_filename if mobile_full_filename else None, "Mobile Full"),
-        ]:
-            if filename and path and os.path.exists(str(path)) and os.path.getsize(str(path)) > 0:
-                verified_filenames[key] = filename
-            elif filename:
-                logger.warning(f"[analyze_url_human] {name} screenshot missing or empty: {path}")
-                verified_filenames[key] = None
-        
-        # Use verified filenames (None if file doesn't exist)
-        desktop_atf_filename = verified_filenames.get("desktop_atf")
-        desktop_full_filename = verified_filenames.get("desktop_full")
-        mobile_atf_filename = verified_filenames.get("mobile_atf")
-        mobile_full_filename = verified_filenames.get("mobile_full")
-        
-        # Build base URL - use PUBLIC_BASE_URL if set (production), otherwise fallback to request
-        from api.core.config import get_public_base_url
-        public_base_url = get_public_base_url()
-        
-        if public_base_url:
-            # Use PUBLIC_BASE_URL (production)
-            base_url = public_base_url.rstrip("/")
-        else:
-            # Fallback to request-based URL (local development)
-            # Use request.url to get the base URL (more reliable than headers)
-            try:
-                # Get base URL from request.url (scheme + netloc only)
-                request_url = request.url
-                base_url = f"{request_url.scheme}://{request_url.netloc}"
-                
-                # Filter out Railway internal domains (they don't work from browser)
-                if ".railway.internal" in base_url:
-                    # Try to get Railway public domain from environment
-                    railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_STATIC_URL")
-                    if railway_domain:
-                        # Remove protocol if present
-                        railway_domain = railway_domain.replace("https://", "").replace("http://", "").rstrip("/")
-                        # Use the scheme from request
-                        base_url = f"{request_url.scheme}://{railway_domain}"
-                    else:
-                        # Fallback: remove .railway.internal suffix
-                        base_url = base_url.replace(".railway.internal", "")
-            except Exception:
-                # Fallback to header-based approach if request.url fails
-                proto = request.headers.get("x-forwarded-proto", "https")
-                host = request.headers.get("host", "")
-                
-                # Extract only hostname (remove path if present)
-                if host:
-                    # Remove any path that might be in host header
-                    host = host.split("/")[0].split(":")[0]
-                
-                # Filter out Railway internal domains
-                if host and ".railway.internal" in host:
-                    railway_domain = os.getenv("RAILWAY_PUBLIC_DOMAIN") or os.getenv("RAILWAY_STATIC_URL")
-                    if railway_domain:
-                        railway_domain = railway_domain.replace("https://", "").replace("http://", "").rstrip("/")
-                        host = railway_domain
-                    else:
-                        host = host.replace(".railway.internal", "")
-                
-                base_url = f"{proto}://{host}" if host else "https://nima-ai-marketing-production-57b4.up.railway.app"
-        
-        # Final verification: Ensure files exist before returning URLs
-        # This helps catch issues early and provides better error messages
-        from api.paths import ARTIFACTS_DIR
-        verification_issues = []
-        
-        if desktop_atf_filename:
-            desktop_atf_path = ARTIFACTS_DIR / desktop_atf_filename
-            if not desktop_atf_path.exists():
-                verification_issues.append(f"Desktop ATF file not found: {desktop_atf_path}")
-        if desktop_full_filename:
-            desktop_full_path = ARTIFACTS_DIR / desktop_full_filename
-            if not desktop_full_path.exists():
-                verification_issues.append(f"Desktop Full file not found: {desktop_full_path}")
-        if mobile_atf_filename:
-            mobile_atf_path = ARTIFACTS_DIR / mobile_atf_filename
-            if not mobile_atf_path.exists():
-                verification_issues.append(f"Mobile ATF file not found: {mobile_atf_path}")
-        if mobile_full_filename:
-            mobile_full_path = ARTIFACTS_DIR / mobile_full_filename
-            if not mobile_full_path.exists():
-                verification_issues.append(f"Mobile Full file not found: {mobile_full_path}")
-        
-        if verification_issues:
-            logger.error(f"File verification failed: {', '.join(verification_issues)}")
-            logger.error(f"Artifacts directory: {ARTIFACTS_DIR}, exists: {ARTIFACTS_DIR.exists()}")
-            # Don't fail the request, but log the issue - files might exist on a different instance
-        
-        # Build screenshot URLs for new structure
-        screenshots_response = {
-            "desktop": {
-                "above_the_fold": f"{base_url}/api/artifacts/{desktop_atf_filename}" if desktop_atf_filename else None,
-                "full_page": f"{base_url}/api/artifacts/{desktop_full_filename}" if desktop_full_filename else None,
-                "viewport": desktop_screenshots.get("viewport", {"width": 1365, "height": 768})
-            },
-            "mobile": {
-                "above_the_fold": f"{base_url}/api/artifacts/{mobile_atf_filename}" if mobile_atf_filename else None,
-                "full_page": f"{base_url}/api/artifacts/{mobile_full_filename}" if mobile_full_filename else None,
-                "viewport": mobile_screenshots.get("viewport", {"width": 390, "height": 844})
+        # Screenshots now return new structure with desktop and mobile (using data URLs)
+        if not capture:
+            logger.error("[analyze_url_human] Capture is None - screenshots will be missing!")
+            print("[analyze_url_human] ⚠️ WARNING: Capture is None")
+            screenshots_response = {
+                "desktop": {
+                    "above_the_fold_data_url": None,
+                    "full_page_data_url": None,
+                    "viewport": {"width": 1365, "height": 768},
+                    "above_the_fold": None,
+                    "full_page": None,
+                },
+                "mobile": {
+                    "above_the_fold_data_url": None,
+                    "full_page_data_url": None,
+                    "viewport": {"width": 390, "height": 844},
+                    "above_the_fold": None,
+                    "full_page": None,
+                }
             }
-        }
+        else:
+            screenshots_raw = capture.get("screenshots", {})
+            if not screenshots_raw:
+                logger.error("[analyze_url_human] Screenshots missing from capture!")
+                print("[analyze_url_human] ⚠️ WARNING: Screenshots missing from capture")
+                print(f"[analyze_url_human] Capture keys: {list(capture.keys())}")
+            
+            desktop_screenshots = screenshots_raw.get("desktop", {}) if screenshots_raw else {}
+            mobile_screenshots = screenshots_raw.get("mobile", {}) if screenshots_raw else {}
+            
+            # Extract data URLs (new approach - no file system dependency)
+            desktop_atf_data_url = desktop_screenshots.get("above_the_fold_data_url")
+            desktop_full_data_url = desktop_screenshots.get("full_page_data_url")
+            mobile_atf_data_url = mobile_screenshots.get("above_the_fold_data_url")
+            mobile_full_data_url = mobile_screenshots.get("full_page_data_url")
+            
+            # Log screenshot status for debugging
+            print(f"[analyze_url_human] Screenshot status:")
+            print(f"  Desktop ATF: {'✅' if desktop_atf_data_url else '❌'}")
+            print(f"  Desktop Full: {'✅' if desktop_full_data_url else '❌'}")
+            print(f"  Mobile ATF: {'✅' if mobile_atf_data_url else '❌'}")
+            print(f"  Mobile Full: {'✅' if mobile_full_data_url else '❌'}")
+            
+            # Verify data URLs exist and are valid
+            if not desktop_atf_data_url or not desktop_atf_data_url.startswith("data:image/png;base64,"):
+                logger.warning(f"[analyze_url_human] Desktop ATF data URL missing or invalid: {desktop_atf_data_url[:50] if desktop_atf_data_url else 'None'}...")
+            if not desktop_full_data_url or not desktop_full_data_url.startswith("data:image/png;base64,"):
+                logger.warning(f"[analyze_url_human] Desktop Full data URL missing or invalid: {desktop_full_data_url[:50] if desktop_full_data_url else 'None'}...")
+            if not mobile_atf_data_url or not mobile_atf_data_url.startswith("data:image/png;base64,"):
+                logger.warning(f"[analyze_url_human] Mobile ATF data URL missing or invalid: {mobile_atf_data_url[:50] if mobile_atf_data_url else 'None'}...")
+            if not mobile_full_data_url or not mobile_full_data_url.startswith("data:image/png;base64,"):
+                logger.warning(f"[analyze_url_human] Mobile Full data URL missing or invalid: {mobile_full_data_url[:50] if mobile_full_data_url else 'None'}...")
+            
+            # Build screenshot response with data URLs (no file system needed)
+            # Include both new (data_url) and legacy (above_the_fold) fields for frontend compatibility
+            screenshots_response = {
+                "desktop": {
+                    "above_the_fold_data_url": desktop_atf_data_url,
+                    "full_page_data_url": desktop_full_data_url,
+                    "viewport": desktop_screenshots.get("viewport", {"width": 1365, "height": 768}),
+                    # Legacy fields for frontend compatibility (ScreenshotOnlyATF.tsx expects these)
+                    "above_the_fold": desktop_atf_data_url,  # Use data URL as value
+                    "aboveFold": desktop_atf_data_url,  # Alternative field name
+                    "full_page": desktop_full_data_url,
+                },
+                "mobile": {
+                    "above_the_fold_data_url": mobile_atf_data_url,
+                    "full_page_data_url": mobile_full_data_url,
+                    "viewport": mobile_screenshots.get("viewport", {"width": 390, "height": 844}),
+                    # Legacy fields for frontend compatibility
+                    "above_the_fold": mobile_atf_data_url,  # Use data URL as value
+                    "aboveFold": mobile_atf_data_url,  # Alternative field name
+                    "full_page": mobile_full_data_url,
+                }
+            }
         
         # Limit response size - don't send full HTML/capture data
+        # But include capture with screenshots for frontend compatibility
         response_data = {
             "analysisStatus": "ok",
             "human_report": human_report,
@@ -571,9 +452,15 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
             },
             "findings": findings.get("findings", {}),
             "capture_info": {
-                "timestamp": capture.get("timestamp_utc"),
+                "timestamp": capture.get("timestamp_utc") if capture else None,
                 "screenshots": screenshots_response,
-                "title": capture.get("dom", {}).get("title"),
+                "title": capture.get("dom", {}).get("title") if capture else None,
+            },
+            # Add capture object for frontend compatibility (ScreenshotOnlyATF.tsx expects capture.desktop.above_the_fold)
+            "capture": capture if capture else {
+                "timestamp_utc": None,
+                "screenshots": screenshots_response,
+                "dom": {}
             },
             "page_map": {
                 "headlines": page_map.get("headlines", []),
@@ -589,9 +476,10 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
             import hashlib
 
             top_issues = findings.get("findings", {}).get("top_issues", [])
+            # Use data URLs for memory (or None if not available)
             screenshots_for_memory = {
-                "desktop_atf": screenshots_response.get("desktop", {}).get("above_the_fold"),
-                "mobile_atf": screenshots_response.get("mobile", {}).get("above_the_fold"),
+                "desktop_atf": screenshots_response.get("desktop", {}).get("above_the_fold_data_url"),
+                "mobile_atf": screenshots_response.get("mobile", {}).get("above_the_fold_data_url"),
             }
             report_hash = hashlib.sha256((human_report or "").encode("utf-8")).hexdigest()
 

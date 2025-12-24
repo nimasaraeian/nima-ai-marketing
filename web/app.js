@@ -353,7 +353,7 @@ function showResults(result, moduleTitle) {
         
         screenshotsHtml += '</div></div>';
     }
-    // Check for old format: result.capture_info.screenshots
+    // Check for new format with Base64 data URLs: result.capture_info.screenshots or result.screenshots
     else if (result.capture_info && result.capture_info.screenshots) {
         const screenshots = result.capture_info.screenshots;
         
@@ -361,30 +361,113 @@ function showResults(result, moduleTitle) {
         screenshotsHtml += '<h3 style="margin-bottom: 1rem;">Screenshots</h3>';
         screenshotsHtml += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem;">';
         
-        if (screenshots.above_the_fold) {
-            const atfPath = screenshots.above_the_fold.split(/[/\\]/).pop();
-            screenshotsHtml += `
-                <div>
-                    <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Above the Fold</h4>
-                    <img src="${apiBaseUrl}/api/artifacts/${atfPath}" 
-                         alt="Above the fold screenshot" 
-                         style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
-                         onclick="window.open(this.src, '_blank')" />
-                </div>
-            `;
+        // Check for new Base64 data URL format (desktop and mobile)
+        if (screenshots.desktop) {
+            const desktop = screenshots.desktop;
+            
+            // Desktop Above the Fold (use data URL if available, fallback to old format)
+            const desktopAtfUrl = desktop.above_the_fold_data_url || 
+                (desktop.above_the_fold ? `${apiBaseUrl}/api/artifacts/${desktop.above_the_fold.split(/[/\\]/).pop()}` : null);
+            
+            if (desktopAtfUrl) {
+                screenshotsHtml += `
+                    <div>
+                        <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Desktop - Above the Fold</h4>
+                        <img src="${desktopAtfUrl}" 
+                             alt="Desktop above the fold screenshot" 
+                             style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                             onclick="window.open(this.src, '_blank')" 
+                             onerror="this.parentElement.innerHTML='<p style=\\'color: red;\\'>Failed to load desktop screenshot</p>'" />
+                    </div>
+                `;
+            }
+            
+            // Desktop Full Page
+            const desktopFullUrl = desktop.full_page_data_url || 
+                (desktop.full_page ? `${apiBaseUrl}/api/artifacts/${desktop.full_page.split(/[/\\]/).pop()}` : null);
+            
+            if (desktopFullUrl) {
+                screenshotsHtml += `
+                    <div>
+                        <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Desktop - Full Page</h4>
+                        <img src="${desktopFullUrl}" 
+                             alt="Desktop full page screenshot" 
+                             style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                             onclick="window.open(this.src, '_blank')" 
+                             onerror="this.parentElement.innerHTML='<p style=\\'color: red;\\'>Failed to load desktop screenshot</p>'" />
+                    </div>
+                `;
+            }
         }
         
-        if (screenshots.full_page) {
-            const fullPath = screenshots.full_page.split(/[/\\]/).pop();
-            screenshotsHtml += `
-                <div>
-                    <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Full Page</h4>
-                    <img src="${apiBaseUrl}/api/artifacts/${fullPath}" 
-                         alt="Full page screenshot" 
-                         style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
-                         onclick="window.open(this.src, '_blank')" />
-                </div>
-            `;
+        // Mobile screenshots
+        if (screenshots.mobile) {
+            const mobile = screenshots.mobile;
+            
+            // Mobile Above the Fold
+            const mobileAtfUrl = mobile.above_the_fold_data_url || 
+                (mobile.above_the_fold ? `${apiBaseUrl}/api/artifacts/${mobile.above_the_fold.split(/[/\\]/).pop()}` : null);
+            
+            if (mobileAtfUrl) {
+                screenshotsHtml += `
+                    <div>
+                        <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Mobile - Above the Fold</h4>
+                        <img src="${mobileAtfUrl}" 
+                             alt="Mobile above the fold screenshot" 
+                             style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                             onclick="window.open(this.src, '_blank')" 
+                             onerror="this.parentElement.innerHTML='<p style=\\'color: red;\\'>Failed to load mobile screenshot</p>'" />
+                    </div>
+                `;
+            }
+            
+            // Mobile Full Page
+            const mobileFullUrl = mobile.full_page_data_url || 
+                (mobile.full_page ? `${apiBaseUrl}/api/artifacts/${mobile.full_page.split(/[/\\]/).pop()}` : null);
+            
+            if (mobileFullUrl) {
+                screenshotsHtml += `
+                    <div>
+                        <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Mobile - Full Page</h4>
+                        <img src="${mobileFullUrl}" 
+                             alt="Mobile full page screenshot" 
+                             style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                             onclick="window.open(this.src, '_blank')" 
+                             onerror="this.parentElement.innerHTML='<p style=\\'color: red;\\'>Failed to load mobile screenshot</p>'" />
+                    </div>
+                `;
+            }
+        }
+        
+        // Fallback to old format (for backward compatibility)
+        if (!screenshots.desktop && !screenshots.mobile) {
+            if (screenshots.above_the_fold) {
+                const atfPath = screenshots.above_the_fold.split(/[/\\]/).pop();
+                screenshotsHtml += `
+                    <div>
+                        <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Above the Fold</h4>
+                        <img src="${apiBaseUrl}/api/artifacts/${atfPath}" 
+                             alt="Above the fold screenshot" 
+                             style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                             onclick="window.open(this.src, '_blank')" 
+                             onerror="this.parentElement.innerHTML='<p style=\\'color: red;\\'>Failed to load screenshot</p>'" />
+                    </div>
+                `;
+            }
+            
+            if (screenshots.full_page) {
+                const fullPath = screenshots.full_page.split(/[/\\]/).pop();
+                screenshotsHtml += `
+                    <div>
+                        <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Full Page</h4>
+                        <img src="${apiBaseUrl}/api/artifacts/${fullPath}" 
+                             alt="Full page screenshot" 
+                             style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                             onclick="window.open(this.src, '_blank')" 
+                             onerror="this.parentElement.innerHTML='<p style=\\'color: red;\\'>Failed to load screenshot</p>'" />
+                    </div>
+                `;
+            }
         }
         
         screenshotsHtml += '</div></div>';
@@ -1147,44 +1230,196 @@ function showHumanDecisionResults(result) {
     const modal = document.getElementById('resultsModal');
     const container = document.getElementById('resultsContainer');
     
-    // Extract screenshots if available
+    // Persist last analysis info for feedback
+    window.lastHumanDecisionAnalysis = {
+        analysisId: result.analysis_id || null,
+        pageType: result.page_type || null,
+        topIssues: (result.findings && Array.isArray(result.findings.top_issues)) ? result.findings.top_issues : [],
+    };
+    
+    // Extract screenshots if available (using Base64 data URLs)
     let screenshotsHtml = '';
     if (result.capture_info && result.capture_info.screenshots) {
         const screenshots = result.capture_info.screenshots;
         const apiBaseUrl = API_BASE_URL;
         
         screenshotsHtml = '<div style="margin-top: 2rem; padding-top: 1rem; border-top: 2px solid var(--border-color);">';
-        screenshotsHtml += '<h3 style="margin-bottom: 1rem;">Screenshots</h3>';
+        screenshotsHtml += '<h3 style="margin-bottom: 1rem;">Visual Evidence - Screenshots</h3>';
         screenshotsHtml += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1rem;">';
         
-        if (screenshots.above_the_fold) {
-            const atfPath = screenshots.above_the_fold.split(/[/\\]/).pop();
-            screenshotsHtml += `
-                <div>
-                    <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Above the Fold</h4>
-                    <img src="${apiBaseUrl}/api/artifacts/${atfPath}" 
-                         alt="Above the fold screenshot" 
-                         style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
-                         onclick="window.open(this.src, '_blank')" />
-                </div>
-            `;
+        // Check for new Base64 data URL format (desktop and mobile)
+        if (screenshots.desktop) {
+            const desktop = screenshots.desktop;
+            
+            // Desktop Above the Fold
+            const desktopAtfUrl = desktop.above_the_fold_data_url || 
+                (desktop.above_the_fold ? `${apiBaseUrl}/api/artifacts/${desktop.above_the_fold.split(/[/\\]/).pop()}` : null);
+            
+            if (desktopAtfUrl) {
+                screenshotsHtml += `
+                    <div>
+                        <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Desktop - Above the Fold</h4>
+                        <img src="${desktopAtfUrl}" 
+                             alt="Desktop above the fold screenshot" 
+                             style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                             onclick="window.open(this.src, '_blank')" 
+                             onerror="this.parentElement.innerHTML='<p style=\\'color: red;\\'>Failed to load desktop screenshot</p>'" />
+                    </div>
+                `;
+            }
+            
+            // Desktop Full Page
+            const desktopFullUrl = desktop.full_page_data_url || 
+                (desktop.full_page ? `${apiBaseUrl}/api/artifacts/${desktop.full_page.split(/[/\\]/).pop()}` : null);
+            
+            if (desktopFullUrl) {
+                screenshotsHtml += `
+                    <div>
+                        <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Desktop - Full Page</h4>
+                        <img src="${desktopFullUrl}" 
+                             alt="Desktop full page screenshot" 
+                             style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                             onclick="window.open(this.src, '_blank')" 
+                             onerror="this.parentElement.innerHTML='<p style=\\'color: red;\\'>Failed to load desktop screenshot</p>'" />
+                    </div>
+                `;
+            }
         }
         
-        if (screenshots.full_page) {
-            const fullPath = screenshots.full_page.split(/[/\\]/).pop();
-            screenshotsHtml += `
-                <div>
-                    <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Full Page</h4>
-                    <img src="${apiBaseUrl}/api/artifacts/${fullPath}" 
-                         alt="Full page screenshot" 
-                         style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
-                         onclick="window.open(this.src, '_blank')" />
-                </div>
-            `;
+        // Mobile screenshots
+        if (screenshots.mobile) {
+            const mobile = screenshots.mobile;
+            
+            // Mobile Above the Fold
+            const mobileAtfUrl = mobile.above_the_fold_data_url || 
+                (mobile.above_the_fold ? `${apiBaseUrl}/api/artifacts/${mobile.above_the_fold.split(/[/\\]/).pop()}` : null);
+            
+            if (mobileAtfUrl) {
+                screenshotsHtml += `
+                    <div>
+                        <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Mobile - Above the Fold</h4>
+                        <img src="${mobileAtfUrl}" 
+                             alt="Mobile above the fold screenshot" 
+                             style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                             onclick="window.open(this.src, '_blank')" 
+                             onerror="this.parentElement.innerHTML='<p style=\\'color: red;\\'>Failed to load mobile screenshot</p>'" />
+                    </div>
+                `;
+            }
+            
+            // Mobile Full Page
+            const mobileFullUrl = mobile.full_page_data_url || 
+                (mobile.full_page ? `${apiBaseUrl}/api/artifacts/${mobile.full_page.split(/[/\\]/).pop()}` : null);
+            
+            if (mobileFullUrl) {
+                screenshotsHtml += `
+                    <div>
+                        <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Mobile - Full Page</h4>
+                        <img src="${mobileFullUrl}" 
+                             alt="Mobile full page screenshot" 
+                             style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                             onclick="window.open(this.src, '_blank')" 
+                             onerror="this.parentElement.innerHTML='<p style=\\'color: red;\\'>Failed to load mobile screenshot</p>'" />
+                    </div>
+                `;
+            }
+        }
+        
+        // Fallback to old format (for backward compatibility)
+        if (!screenshots.desktop && !screenshots.mobile) {
+            if (screenshots.above_the_fold) {
+                const atfPath = screenshots.above_the_fold.split(/[/\\]/).pop();
+                screenshotsHtml += `
+                    <div>
+                        <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Above the Fold</h4>
+                        <img src="${apiBaseUrl}/api/artifacts/${atfPath}" 
+                             alt="Above the fold screenshot" 
+                             style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                             onclick="window.open(this.src, '_blank')" 
+                             onerror="this.parentElement.innerHTML='<p style=\\'color: red;\\'>Failed to load screenshot</p>'" />
+                    </div>
+                `;
+            }
+            
+            if (screenshots.full_page) {
+                const fullPath = screenshots.full_page.split(/[/\\]/).pop();
+                screenshotsHtml += `
+                    <div>
+                        <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Full Page</h4>
+                        <img src="${apiBaseUrl}/api/artifacts/${fullPath}" 
+                             alt="Full page screenshot" 
+                             style="max-width: 100%; height: auto; border: 1px solid #ddd; border-radius: 4px; cursor: pointer;"
+                             onclick="window.open(this.src, '_blank')" 
+                             onerror="this.parentElement.innerHTML='<p style=\\'color: red;\\'>Failed to load screenshot</p>'" />
+                    </div>
+                `;
+            }
         }
         
         screenshotsHtml += '</div></div>';
     }
+    
+    // Build feedback UI (3 buttons + optional wrong issues checklist)
+    const topIssues = window.lastHumanDecisionAnalysis.topIssues || [];
+    const analysisId = window.lastHumanDecisionAnalysis.analysisId;
+    
+    const hasIssues = topIssues.length > 0;
+    const issuesChecklistHtml = hasIssues ? `
+        <div id="feedbackWrongSection" style="margin-top: 1.5rem; display: none;">
+            <h4 style="margin-bottom: 0.5rem; font-size: 1rem;">Which parts were wrong?</h4>
+            <p style="font-size: 0.875rem; color: #6b7280; margin-bottom: 0.75rem;">
+                Select the issues that felt incorrect or irrelevant.
+            </p>
+            <div style="display: flex; flex-direction: column; gap: 0.5rem;">
+                ${topIssues.map(issue => `
+                    <label style="display: flex; align-items: flex-start; gap: 0.5rem; font-size: 0.9rem;">
+                        <input type="checkbox" class="feedback-issue-checkbox" value="${issue.id || ''}" style="margin-top: 0.15rem;">
+                        <span>
+                            <strong>${issue.id || 'issue'}</strong>
+                            ${issue.problem ? ` — ${issue.problem}` : ''}
+                        </span>
+                    </label>
+                `).join('')}
+            </div>
+            <div style="margin-top: 1rem;">
+                <label for="feedbackNotes" class="form-label" style="display:block; margin-bottom: 0.25rem;">Notes (optional)</label>
+                <textarea id="feedbackNotes" class="form-textarea" rows="3" placeholder="Tell us what felt off, or what the engine missed..."></textarea>
+            </div>
+            <div style="margin-top: 1rem; display: flex; gap: 0.75rem;">
+                <button type="button" class="btn btn-primary" onclick="submitHumanDecisionFeedback()">Send feedback</button>
+                <button type="button" class="btn btn-secondary" onclick="resetHumanDecisionFeedback()">Cancel</button>
+            </div>
+        </div>
+    ` : `
+        <div id="feedbackWrongSection" style="margin-top: 1.5rem; display: none;">
+            <p style="font-size: 0.9rem; color: #6b7280;">
+                No individual issues detected for this report. You can still leave a brief note:
+            </p>
+            <div style="margin-top: 0.75rem;">
+                <label for="feedbackNotes" class="form-label" style="display:block; margin-bottom: 0.25rem;">Notes (optional)</label>
+                <textarea id="feedbackNotes" class="form-textarea" rows="3" placeholder="Tell us what felt off, or what the engine missed..."></textarea>
+            </div>
+            <div style="margin-top: 1rem; display: flex; gap: 0.75rem;">
+                <button type="button" class="btn btn-primary" onclick="submitHumanDecisionFeedback()">Send feedback</button>
+                <button type="button" class="btn btn-secondary" onclick="resetHumanDecisionFeedback()">Cancel</button>
+            </div>
+        </div>
+    `;
+    
+    const feedbackButtonsHtml = analysisId ? `
+        <div style="margin-top: 2rem; padding-top: 1rem; border-top: 2px solid var(--border-color);">
+            <h3 style="margin-bottom: 0.75rem; font-size: 1rem;">How accurate was this analysis?</h3>
+            <div style="display: flex; flex-wrap: wrap; gap: 0.5rem;">
+                <button type="button" class="btn btn-secondary" onclick="setHumanDecisionFeedbackLabel('accurate')">Accurate</button>
+                <button type="button" class="btn btn-secondary" onclick="setHumanDecisionFeedbackLabel('partial')">Partly</button>
+                <button type="button" class="btn btn-secondary" onclick="setHumanDecisionFeedbackLabel('wrong')">Wrong</button>
+            </div>
+            <p style="margin-top: 0.5rem; font-size: 0.8rem; color: #6b7280;">
+                Your feedback helps the Decision Brain recalibrate its rules daily.
+            </p>
+            ${issuesChecklistHtml}
+        </div>
+    ` : '';
     
     container.innerHTML = `
         <div class="results-header">
@@ -1198,8 +1433,141 @@ function showHumanDecisionResults(result) {
             <button class="btn btn-primary" onclick="downloadResults('Human Decision Review', \`${escapeHtml(result.report || 'No report available.')}\`)">Copy report</button>
             <button class="btn btn-secondary" onclick="closeResults()">Close</button>
         </div>
+        ${feedbackButtonsHtml}
     `;
     
     modal.style.display = 'block';
+}
+
+// Feedback state helpers
+function setHumanDecisionFeedbackLabel(label) {
+    if (!window.lastHumanDecisionAnalysis || !window.lastHumanDecisionAnalysis.analysisId) {
+        alert('Analysis ID not available. Please run a new analysis first.');
+        return;
+    }
+    window.humanDecisionFeedbackLabel = label;
+    
+    // Toggle wrong issues section
+    const wrongSection = document.getElementById('feedbackWrongSection');
+    if (wrongSection) {
+        wrongSection.style.display = label === 'wrong' ? 'block' : 'none';
+    }
+    
+    // Simple visual cue: highlight selected button
+    const container = document.getElementById('resultsContainer');
+    if (!container) return;
+    const buttons = container.querySelectorAll('button.btn.btn-secondary');
+    buttons.forEach(btn => {
+        if (btn.textContent.trim().toLowerCase() === 'accurate' && label === 'accurate') {
+            btn.style.borderColor = '#10b981';
+        } else if (btn.textContent.trim().toLowerCase() === 'partly' && label === 'partial') {
+            btn.style.borderColor = '#f59e0b';
+        } else if (btn.textContent.trim().toLowerCase() === 'wrong' && label === 'wrong') {
+            btn.style.borderColor = '#ef4444';
+        } else if (['accurate', 'partly', 'wrong'].includes(btn.textContent.trim().toLowerCase())) {
+            btn.style.borderColor = 'transparent';
+        }
+    });
+}
+
+function resetHumanDecisionFeedback() {
+    window.humanDecisionFeedbackLabel = null;
+    const wrongSection = document.getElementById('feedbackWrongSection');
+    if (wrongSection) {
+        wrongSection.style.display = 'none';
+        const checkboxes = wrongSection.querySelectorAll('.feedback-issue-checkbox');
+        checkboxes.forEach(cb => { cb.checked = false; });
+        const notes = document.getElementById('feedbackNotes');
+        if (notes) notes.value = '';
+    }
+}
+
+async function submitHumanDecisionFeedback() {
+    const analysis = window.lastHumanDecisionAnalysis || {};
+    const analysisId = analysis.analysisId;
+    const label = window.humanDecisionFeedbackLabel;
+    
+    if (!analysisId) {
+        alert('Analysis ID not available. Please run a new analysis first.');
+        return;
+    }
+    if (!label) {
+        alert('Please select one of: Accurate, Partly, or Wrong.');
+        return;
+    }
+    
+    let wrongIssues = [];
+    const wrongSection = document.getElementById('feedbackWrongSection');
+    if (wrongSection && label === 'wrong') {
+        const checkboxes = wrongSection.querySelectorAll('.feedback-issue-checkbox');
+        wrongIssues = Array.from(checkboxes)
+            .filter(cb => cb.checked && cb.value)
+            .map(cb => cb.value);
+    }
+    
+    if (label !== 'wrong') {
+        wrongIssues = [];
+    }
+    
+    const notesEl = document.getElementById('feedbackNotes');
+    const notes = notesEl ? notesEl.value.trim() : '';
+    
+    const payload = {
+        analysis_id: analysisId,
+        label: label,
+        wrong_issues: wrongIssues,
+        notes: notes || undefined,
+    };
+    
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/brain/feedback`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload),
+        });
+        
+        if (!response.ok) {
+            const errorInfo = await parseErrorResponse(response);
+            throw new Error(errorInfo.message || `Feedback error ${response.status}`);
+        }
+        
+        showToast('Thanks — feedback saved.');
+        resetHumanDecisionFeedback();
+    } catch (error) {
+        console.error('Feedback error:', error);
+        alert('Failed to save feedback: ' + (error.message || 'Unknown error'));
+    }
+}
+
+// Simple toast helper
+function showToast(message) {
+    const toast = document.createElement('div');
+    toast.style.cssText = `
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        background: #111827;
+        color: #f9fafb;
+        padding: 12px 16px;
+        border-radius: 999px;
+        box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        z-index: 10000;
+        font-size: 0.9rem;
+        font-family: Arial, sans-serif;
+    `;
+    toast.textContent = message;
+    document.body.appendChild(toast);
+    
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transition = 'opacity 0.2s ease-out';
+        setTimeout(() => {
+            if (toast.parentNode) {
+                toast.remove();
+            }
+        }, 200);
+    }, 2500);
 }
 

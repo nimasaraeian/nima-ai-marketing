@@ -8,6 +8,7 @@ import time
 import datetime
 import asyncio
 import logging
+import base64
 from pathlib import Path
 from typing import Dict, Any
 from playwright.async_api import async_playwright
@@ -19,6 +20,11 @@ logger = logging.getLogger(__name__)
 
 # Use centralized paths from api.paths
 from api.paths import ARTIFACTS_DIR
+
+
+def png_bytes_to_data_url(png_bytes: bytes) -> str:
+    """Convert PNG bytes to Base64 data URL."""
+    return "data:image/png;base64," + base64.b64encode(png_bytes).decode("utf-8")
 
 
 def _utc_now():
@@ -81,8 +87,6 @@ def _prepare_page_for_atf(page):
 
 def _capture_viewport_sync(
     url: str, 
-    atf_path: str, 
-    full_path: str, 
     viewport: dict,
     is_mobile: bool = False
 ) -> tuple:
@@ -94,19 +98,19 @@ def _capture_viewport_sync(
     
     Args:
         url: URL to capture
-        atf_path: Path to save ATF screenshot
-        full_path: Path to save full page screenshot
         viewport: Viewport dict with width and height
         is_mobile: Whether to enable mobile emulation
         
     Returns:
-        Tuple of (html, title, readable)
+        Tuple of (html, title, readable, atf_bytes, full_bytes)
     """
     from playwright.sync_api import sync_playwright
     
     html = ""
     title = ""
     readable = ""
+    atf_bytes = b""
+    full_bytes = b""
     
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -148,9 +152,9 @@ def _capture_viewport_sync(
             # Prepare page for ATF capture (wait for render, scroll to top)
             _prepare_page_for_atf(page)
             
-            # Take ATF screenshot FIRST (from top, no scrolling)
+            # Take ATF screenshot FIRST (from top, no scrolling) - return bytes instead of saving
             # This ensures we capture the actual "above the fold" content
-            page.screenshot(path=atf_path, full_page=False)
+            atf_bytes = page.screenshot(full_page=False, type="png")
             
             # Now scroll down to load lazy sections for full page screenshot
             # Simple auto-scroll to load lazy sections
@@ -158,8 +162,8 @@ def _capture_viewport_sync(
                 page.mouse.wheel(0, 1200)
                 page.wait_for_timeout(200)
             
-            # Take full page screenshot
-            page.screenshot(path=full_path, full_page=True)
+            # Take full page screenshot - return bytes instead of saving
+            full_bytes = page.screenshot(full_page=True, type="png")
             
             # Extract content (use desktop page for content extraction)
             if not is_mobile:
@@ -176,13 +180,13 @@ def _capture_viewport_sync(
         finally:
             browser.close()
     
-    return html, title, readable
+    return html, title, readable, atf_bytes, full_bytes
 
 
 async def capture_page_artifacts(url: str) -> Dict[str, Any]:
     """
     Capture page artifacts using Playwright:
-    - Screenshots (Desktop ATF + Full, Mobile ATF + Full)
+    - Screenshots (Desktop ATF + Full, Mobile ATF + Full) as Base64 data URLs
     - HTML content
     - Readable text
     
@@ -190,70 +194,65 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
         url: URL to capture
         
     Returns:
-        Dictionary with screenshots paths, DOM content, and metadata
+        Dictionary with screenshot data URLs, DOM content, and metadata
     """
-    # Ensure directory exists (already done in api.paths, but ensure anyway)
-    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
-    
-    ts = int(time.time())
-    
     # Desktop viewport
     desktop_viewport = {"width": 1365, "height": 768}
-    desktop_atf_filename = f"atf_desktop_{ts}.png"
-    desktop_full_filename = f"full_desktop_{ts}.png"
-    desktop_atf_path = ARTIFACTS_DIR / desktop_atf_filename
-    desktop_full_path = ARTIFACTS_DIR / desktop_full_filename
     
     # Mobile viewport
     mobile_viewport = {"width": 390, "height": 844}
-    mobile_atf_filename = f"atf_mobile_{ts}.png"
-    mobile_full_filename = f"full_mobile_{ts}.png"
-    mobile_atf_path = ARTIFACTS_DIR / mobile_atf_filename
-    mobile_full_path = ARTIFACTS_DIR / mobile_full_filename
     
     html = ""
     title = ""
     readable = ""
+    desktop_atf_bytes = b""
+    desktop_full_bytes = b""
+    mobile_atf_bytes = b""
+    mobile_full_bytes = b""
     
     try:
         # Run Playwright in a thread pool to avoid event loop conflicts
         loop = asyncio.get_event_loop()
         
         # Capture desktop screenshots (also extract HTML/title/readable from desktop)
-        html, title, readable = await loop.run_in_executor(
+        html, title, readable, desktop_atf_bytes, desktop_full_bytes = await loop.run_in_executor(
             None,  # Use default executor (ThreadPoolExecutor)
             _capture_viewport_sync,
-            url, str(desktop_atf_path), str(desktop_full_path), desktop_viewport, False
+            url, desktop_viewport, False
         )
         
         # Capture mobile screenshots (don't extract content again, use desktop)
-        await loop.run_in_executor(
+        _, _, _, mobile_atf_bytes, mobile_full_bytes = await loop.run_in_executor(
             None,
             _capture_viewport_sync,
-            url, str(mobile_atf_path), str(mobile_full_path), mobile_viewport, True
+            url, mobile_viewport, True
         )
         
-        # Verify all screenshots were saved
-        screenshots_to_check = [
-            (desktop_atf_path, "Desktop ATF"),
-            (desktop_full_path, "Desktop Full"),
-            (mobile_atf_path, "Mobile ATF"),
-            (mobile_full_path, "Mobile Full"),
-        ]
-        
-        for screenshot_path, name in screenshots_to_check:
-            if not screenshot_path.exists():
-                raise RuntimeError(f"ARTIFACT_MISSING: {name} screenshot not saved: {screenshot_path}")
-            if screenshot_path.stat().st_size == 0:
-                raise RuntimeError(f"ARTIFACT_INVALID: {name} screenshot is empty: {screenshot_path}")
-        
+        # Safety logs: verify screenshot bytes
         logger.info(
-            f"Screenshots verified: "
-            f"Desktop ATF={desktop_atf_path.stat().st_size} bytes, "
-            f"Desktop Full={desktop_full_path.stat().st_size} bytes, "
-            f"Mobile ATF={mobile_atf_path.stat().st_size} bytes, "
-            f"Mobile Full={mobile_full_path.stat().st_size} bytes"
+            f"Screenshots captured: "
+            f"desktop_atf_bytes={len(desktop_atf_bytes)}, "
+            f"desktop_full_bytes={len(desktop_full_bytes)}, "
+            f"mobile_atf_bytes={len(mobile_atf_bytes)}, "
+            f"mobile_full_bytes={len(mobile_full_bytes)}"
         )
+        
+        # Verify screenshots are valid
+        if len(desktop_atf_bytes) == 0:
+            raise RuntimeError("ARTIFACT_INVALID: Desktop ATF screenshot is empty")
+        if len(desktop_full_bytes) == 0:
+            raise RuntimeError("ARTIFACT_INVALID: Desktop Full screenshot is empty")
+        if len(mobile_atf_bytes) == 0:
+            raise RuntimeError("ARTIFACT_INVALID: Mobile ATF screenshot is empty")
+        if len(mobile_full_bytes) == 0:
+            raise RuntimeError("ARTIFACT_INVALID: Mobile Full screenshot is empty")
+        
+        # Convert PNG bytes to Base64 data URLs
+        desktop_atf_data_url = png_bytes_to_data_url(desktop_atf_bytes)
+        desktop_full_data_url = png_bytes_to_data_url(desktop_full_bytes)
+        mobile_atf_data_url = png_bytes_to_data_url(mobile_atf_bytes)
+        mobile_full_data_url = png_bytes_to_data_url(mobile_full_bytes)
+        
     except Exception as e:
         # Log exception with full traceback
         logger.exception(f"Playwright error while capturing {url}: {type(e).__name__}: {str(e)}")
@@ -278,14 +277,20 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
         "timestamp_utc": _utc_now(),
         "screenshots": {
             "desktop": {
-                "above_the_fold": desktop_atf_filename,  # Only filename, not full path
-                "full_page": desktop_full_filename,  # Only filename, not full path
-                "viewport": desktop_viewport
+                "above_the_fold_data_url": desktop_atf_data_url,
+                "full_page_data_url": desktop_full_data_url,
+                "viewport": desktop_viewport,
+                # Legacy fields (set to None for backward compat, but don't use)
+                "above_the_fold": None,
+                "full_page": None,
             },
             "mobile": {
-                "above_the_fold": mobile_atf_filename,  # Only filename, not full path
-                "full_page": mobile_full_filename,  # Only filename, not full path
-                "viewport": mobile_viewport
+                "above_the_fold_data_url": mobile_atf_data_url,
+                "full_page_data_url": mobile_full_data_url,
+                "viewport": mobile_viewport,
+                # Legacy fields (set to None for backward compat, but don't use)
+                "above_the_fold": None,
+                "full_page": None,
             }
         },
         "dom": {
