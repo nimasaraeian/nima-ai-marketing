@@ -142,12 +142,39 @@ def _capture_viewport_sync(
             context = browser.new_context(**context_options)
             page = context.new_page()
             
-            # Navigate to URL
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
-                timeout=60000
-            )
+            # Navigate to URL with increased timeout and fallback strategies
+            # Some sites (like digikala.com) can take longer to load
+            import os
+            navigation_timeout = int(os.getenv("PLAYWRIGHT_NAVIGATION_TIMEOUT", "120000"))  # Default 120 seconds
+            
+            from playwright.sync_api import TimeoutError as PlaywrightTimeoutError
+            
+            try:
+                # Try with domcontentloaded first (faster, but may miss some content)
+                page.goto(
+                    url,
+                    wait_until="domcontentloaded",
+                    timeout=navigation_timeout
+                )
+            except PlaywrightTimeoutError:
+                # If domcontentloaded times out, try with "load" (less strict)
+                logger.warning(f"domcontentloaded timeout for {url}, trying 'load' condition")
+                try:
+                    page.goto(
+                        url,
+                        wait_until="load",
+                        timeout=navigation_timeout
+                    )
+                except PlaywrightTimeoutError:
+                    # Last resort: try with commit (just wait for navigation to start)
+                    logger.warning(f"load timeout for {url}, trying 'commit' condition")
+                    page.goto(
+                        url,
+                        wait_until="commit",
+                        timeout=min(navigation_timeout, 30000)  # Cap at 30s for commit
+                    )
+                    # Give it some time for basic content to load
+                    page.wait_for_timeout(3000)
             
             # Prepare page for ATF capture (wait for render, scroll to top)
             _prepare_page_for_atf(page)
@@ -215,18 +242,40 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
         loop = asyncio.get_event_loop()
         
         # Capture desktop screenshots (also extract HTML/title/readable from desktop)
-        html, title, readable, desktop_atf_bytes, desktop_full_bytes = await loop.run_in_executor(
-            None,  # Use default executor (ThreadPoolExecutor)
-            _capture_viewport_sync,
-            url, desktop_viewport, False
-        )
+        try:
+            html, title, readable, desktop_atf_bytes, desktop_full_bytes = await loop.run_in_executor(
+                None,  # Use default executor (ThreadPoolExecutor)
+                _capture_viewport_sync,
+                url, desktop_viewport, False
+            )
+        except Exception as desktop_error:
+            logger.error(f"Desktop capture failed for {url}: {desktop_error}")
+            # If desktop fails, try to continue with mobile only
+            # Set empty defaults
+            html = ""
+            title = ""
+            readable = ""
+            desktop_atf_bytes = b""
+            desktop_full_bytes = b""
+            # Re-raise if it's a critical error (not just timeout)
+            if "Timeout" not in str(desktop_error):
+                raise
         
         # Capture mobile screenshots (don't extract content again, use desktop)
-        _, _, _, mobile_atf_bytes, mobile_full_bytes = await loop.run_in_executor(
-            None,
-            _capture_viewport_sync,
-            url, mobile_viewport, True
-        )
+        try:
+            _, _, _, mobile_atf_bytes, mobile_full_bytes = await loop.run_in_executor(
+                None,
+                _capture_viewport_sync,
+                url, mobile_viewport, True
+            )
+        except Exception as mobile_error:
+            logger.error(f"Mobile capture failed for {url}: {mobile_error}")
+            # Set empty defaults if mobile fails
+            mobile_atf_bytes = b""
+            mobile_full_bytes = b""
+            # Re-raise if it's a critical error (not just timeout)
+            if "Timeout" not in str(mobile_error):
+                raise
         
         # Safety logs: verify screenshot bytes
         logger.info(
@@ -237,15 +286,17 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
             f"mobile_full_bytes={len(mobile_full_bytes)}"
         )
         
-        # Verify screenshots are valid
+        # Verify screenshots are valid (allow partial failures for timeout scenarios)
+        if len(desktop_atf_bytes) == 0 and len(mobile_atf_bytes) == 0:
+            raise RuntimeError("ARTIFACT_INVALID: Both desktop and mobile ATF screenshots are empty")
         if len(desktop_atf_bytes) == 0:
-            raise RuntimeError("ARTIFACT_INVALID: Desktop ATF screenshot is empty")
-        if len(desktop_full_bytes) == 0:
-            raise RuntimeError("ARTIFACT_INVALID: Desktop Full screenshot is empty")
+            logger.warning("Desktop ATF screenshot is empty, but mobile capture succeeded")
         if len(mobile_atf_bytes) == 0:
-            raise RuntimeError("ARTIFACT_INVALID: Mobile ATF screenshot is empty")
+            logger.warning("Mobile ATF screenshot is empty, but desktop capture succeeded")
+        if len(desktop_full_bytes) == 0:
+            logger.warning("Desktop Full screenshot is empty")
         if len(mobile_full_bytes) == 0:
-            raise RuntimeError("ARTIFACT_INVALID: Mobile Full screenshot is empty")
+            logger.warning("Mobile Full screenshot is empty")
         
         # Convert PNG bytes to Base64 data URLs
         desktop_atf_data_url = png_bytes_to_data_url(desktop_atf_bytes)
