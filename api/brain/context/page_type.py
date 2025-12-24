@@ -6,6 +6,7 @@ context-aware recommendations.
 """
 from dataclasses import dataclass
 from typing import Literal, Dict, Any, Optional
+from urllib.parse import urlparse
 import logging
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,8 @@ class PageType:
         "content_blog",
         "app_download",
         "enterprise_b2b",
+        "personal_brand_consultant",
+        "b2b_corporate_service",
         "unknown"
     ]
     confidence: float
@@ -72,6 +75,8 @@ def detect_page_type(
         "content_blog": 0.0,
         "app_download": 0.0,
         "enterprise_b2b": 0.0,
+        "personal_brand_consultant": 0.0,
+        "b2b_corporate_service": 0.0,
     }
     
     # Ecommerce Product
@@ -169,7 +174,63 @@ def detect_page_type(
         type_scores["app_download"] += min(app_matches * 0.6, 2.5)
         signals["app_keywords"] = app_matches
     
-    # Enterprise B2B
+    # Personal Brand / Consultant
+    personal_keywords = ["work with me", "consultant", "strategist", "advisor", "coach", "expert"]
+    personal_matches = sum(1 for kw in personal_keywords if kw in page_text_lower)
+    personal_ctas = ["work with me", "book a call", "contact", "let's talk"]
+    personal_cta_matches = sum(1 for cta in personal_ctas if cta in page_text_lower)
+    
+    # Check if person name is prominent (in H1 or title)
+    person_name_prominent = False
+    if page_map:
+        headlines = page_map.get("headlines", [])
+        title = page_map.get("title", "")
+        # Extract potential person name from domain
+        domain = urlparse(url).netloc.lower().replace("www.", "").split(".")[0]
+        
+        # Check if person name appears in H1 or title
+        for h in headlines:
+            if isinstance(h, dict) and h.get("tag") == "h1":
+                h1_text = h.get("text", "").lower()
+                if domain in h1_text or any(word in h1_text for word in domain.split("-")):
+                    person_name_prominent = True
+                    break
+        if domain in title.lower():
+            person_name_prominent = True
+    
+    # No ecommerce signals (no cart, no pricing grid)
+    has_ecommerce_signals = any(kw in page_text_lower for kw in ["add to cart", "buy now", "checkout", "shopping cart"])
+    
+    if personal_matches >= 2 and personal_cta_matches > 0 and not has_ecommerce_signals:
+        type_scores["personal_brand_consultant"] += min(personal_matches * 0.6, 3.0)
+        signals["personal_keywords"] = personal_matches
+        signals["personal_ctas"] = personal_cta_matches
+        if person_name_prominent:
+            type_scores["personal_brand_consultant"] += 2.0
+            signals["person_name_prominent"] = True
+    
+    # B2B Corporate Service
+    b2b_keywords = ["solutions", "projects", "clients", "industries", "services", "team", "portfolio"]
+    b2b_matches = sum(1 for kw in b2b_keywords if kw in page_text_lower)
+    b2b_nav_keywords = ["projects", "services", "contact", "about", "case studies"]
+    b2b_nav_matches = 0
+    
+    if page_map:
+        nav_text = " ".join([
+            str(page_map.get("headlines", [])),
+            str(page_map.get("ctas", []))
+        ]).lower()
+        b2b_nav_matches = sum(1 for kw in b2b_nav_keywords if kw in nav_text)
+    
+    # No instant purchase flow
+    has_instant_purchase = any(kw in page_text_lower for kw in ["add to cart", "buy now", "purchase", "checkout"])
+    
+    if b2b_matches >= 3 and b2b_nav_matches >= 2 and not has_instant_purchase:
+        type_scores["b2b_corporate_service"] += min(b2b_matches * 0.5, 3.0)
+        signals["b2b_keywords"] = b2b_matches
+        signals["b2b_nav"] = b2b_nav_matches
+    
+    # Enterprise B2B (keep existing logic, but check after personal/b2b)
     if brand_ctx and brand_ctx.brand_maturity == "enterprise":
         enterprise_keywords = ["compliance", "security", "soc 2", "contact sales", "rfp", "enterprise"]
         enterprise_matches = sum(1 for kw in enterprise_keywords if kw in page_text_lower)

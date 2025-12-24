@@ -41,9 +41,11 @@ async def build_human_decision_review(
         Complete response dictionary with all required keys
     """
     debug_info = {
-        "pipeline_version": "human_report_v2",
+        "pipeline_version": "human_report_v2.1",
         "steps": [],
-        "errors": []
+        "errors": [],
+        "persona_template_used": "unknown",
+        "cost_template_used": "unknown"
     }
     
     try:
@@ -463,10 +465,39 @@ async def _contextualize_report(report: Dict[str, Any], ctx: Dict[str, Any], deb
 
 
 async def _apply_type_templates(report: Dict[str, Any], ctx: Dict[str, Any], debug_info: Dict[str, Any]) -> Dict[str, Any]:
-    """Apply page-type-specific templates."""
+    """Apply page-type-specific templates (personas, cost of inaction)."""
     try:
         from api.brain.decision_engine.templates_by_type import apply_page_type_templates
-        return apply_page_type_templates(report, ctx)
+        from api.brain.decision_engine.persona_templates import build_personas
+        from api.brain.decision_engine.cost_templates import build_cost_of_inaction
+        
+        # Get page type
+        page_type = ctx.get("page_type", {})
+        page_type_name = page_type.get("type", "unknown")
+        brand_context = ctx.get("brand_context", {})
+        
+        # Replace personas with page-type-specific templates
+        try:
+            personas = build_personas(page_type_name, brand_context)
+            report["mindset_personas"] = personas
+            debug_info["persona_template_used"] = page_type_name
+        except Exception as e:
+            logger.warning(f"Failed to build personas: {e}")
+            debug_info["errors"].append(f"persona_templates: {type(e).__name__}")
+        
+        # Replace cost of inaction with page-type-specific templates
+        try:
+            cost = build_cost_of_inaction(page_type_name)
+            report["cost_of_inaction"] = cost
+            debug_info["cost_template_used"] = page_type_name
+        except Exception as e:
+            logger.warning(f"Failed to build cost of inaction: {e}")
+            debug_info["errors"].append(f"cost_templates: {type(e).__name__}")
+        
+        # Apply other type-specific templates (CTAs, etc.)
+        report = apply_page_type_templates(report, ctx)
+        
+        return report
     except Exception as e:
         logger.warning(f"Failed to apply type templates: {e}")
         debug_info["errors"].append(f"type_templates: {type(e).__name__}")
@@ -528,15 +559,60 @@ def _finalize_and_validate(report: Dict[str, Any], ctx: Dict[str, Any], debug_in
                 import re
                 report["human_report"] = re.sub(r'^\d+\.\s+\*\*.*$', '', report["human_report"], flags=re.MULTILINE)
     
+    # Safety guards: Check for ecommerce phrases in B2B/personal brand contexts
+    page_type_name = ctx.get("page_type", {}).get("type", "unknown")
+    if page_type_name.startswith("personal_") or page_type_name.startswith("b2b_"):
+        forbidden_phrases = ["add to cart", "buy now", "checkout", "untrustworthy"]
+        found_forbidden = []
+        
+        # Check human_report
+        human_report_lower = report.get("human_report", "").lower()
+        for phrase in forbidden_phrases:
+            if phrase in human_report_lower:
+                found_forbidden.append(phrase)
+        
+        # Check personas
+        personas = report.get("mindset_personas", [])
+        for persona in personas:
+            persona_text = " ".join([
+                persona.get("signal", ""),
+                persona.get("goal", ""),
+                persona.get("best_cta", ""),
+                persona.get("next_step", "")
+            ]).lower()
+            for phrase in forbidden_phrases:
+                if phrase in persona_text and phrase not in found_forbidden:
+                    found_forbidden.append(phrase)
+        
+        # Check cost of inaction
+        cost_text = " ".join([
+            report.get("cost_of_inaction", {}).get("headline", ""),
+            " ".join(report.get("cost_of_inaction", {}).get("bullets", []))
+        ]).lower()
+        for phrase in forbidden_phrases:
+            if phrase in cost_text and phrase not in found_forbidden:
+                found_forbidden.append(phrase)
+        
+        if found_forbidden:
+            logger.warning(f"Forbidden ecommerce phrases found in {page_type_name} context: {found_forbidden}")
+            debug_info["errors"].append(f"Forbidden phrases in {page_type_name}: {', '.join(found_forbidden)}")
+            
+            # Sanitize: Replace with neutral B2B language
+            from api.brain.decision_engine.contextualizer import sanitize_text
+            if "untrustworthy" in found_forbidden:
+                report["human_report"] = sanitize_text(report.get("human_report", ""))
+    
     # Add debug info
     report["debug"] = {
-        "pipeline_version": debug_info["pipeline_version"],
+        "pipeline_version": "human_report_v2.1",
         "source": "human_report_v2_only",  # Assertion: confirms v2 pipeline
         "steps": debug_info["steps"],
         "analysis_mode": ctx.get("brand_context", {}).get("analysis_mode", "standard"),
         "brand_maturity": ctx.get("brand_context", {}).get("brand_maturity", "unknown"),
         "page_intent": ctx.get("page_intent", {}).get("intent", "unknown"),
         "page_type": ctx.get("page_type", {}).get("type", "unknown"),
+        "persona_template_used": debug_info.get("persona_template_used", "unknown"),
+        "cost_template_used": debug_info.get("cost_template_used", "unknown"),
         "errors": debug_info["errors"]
     }
     
