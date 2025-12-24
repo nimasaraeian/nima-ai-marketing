@@ -471,6 +471,18 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
             "screenshots": screenshots_response
         }
 
+        # Add signature layers (4 new layers: psychology insight, CTA recommendations, cost of inaction, personas)
+        try:
+            from api.brain.decision_engine.enhancers import build_signature_layers
+            signature_layers = build_signature_layers(response_data)
+            # Merge signature layers into response (backward compatible - new keys only)
+            response_data.update(signature_layers)
+        except Exception as e:
+            # Don't fail the request if enhancers fail - log and continue
+            logger.warning(f"Failed to build signature layers: {e}")
+            import traceback
+            logger.debug(traceback.format_exc())
+
         # Write analysis memory (Decision Brain memory)
         try:
             import hashlib
