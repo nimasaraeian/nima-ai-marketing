@@ -130,8 +130,13 @@ from api.routes.analyze_url_human import router as analyze_url_human_router
 from api.routes.debug_screenshot import router as debug_screenshot_router
 from api.routes.debug import router as debug_router
 from api.routes.brain_features import router as brain_features_router
-from api.routes.brain_memory import router as brain_memory_router
 from api.routes.explain import router as explain_router
+
+# Optional import for brain_memory router (may not be available in all environments)
+try:
+    from api.routes.brain_memory import router as brain_memory_router
+except ImportError:
+    brain_memory_router = None
 
 # Import pricing packages
 try:
