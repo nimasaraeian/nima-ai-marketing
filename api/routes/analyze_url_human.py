@@ -226,332 +226,34 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         print(f"\n[analyze_url_human] Starting analysis for URL: {payload.url}")
         print(f"[analyze_url_human] Goal: {payload.goal}, Locale: {payload.locale}")
         
-        # Step 1: Capture page artifacts
-        print("[analyze_url_human] Step 1: Capturing page artifacts...")
-        logger.info("Starting page capture")
-        capture = await capture_page_artifacts(str(payload.url))
-        logger.info("Page capture completed successfully")
-        print(f"[analyze_url_human] Capture completed. Screenshots: {capture.get('screenshots', {})}")
+        # Use single builder function (enforces correct pipeline ordering)
+        from api.brain.decision_engine.human_report_builder import build_human_decision_review
         
-        # Step 2: Extract page structure
-        print("[analyze_url_human] Step 2: Extracting page structure...")
-        page_map = extract_page_map(capture)
-        print(f"[analyze_url_human] Extracted {len(page_map.get('headlines', []))} headlines, {len(page_map.get('ctas', []))} CTAs")
-        
-        # Step 3: Run heuristics (with page type detection)
-        print("[analyze_url_human] Step 3: Running heuristics...")
-        findings = run_heuristics(
-            capture,
-            page_map,
-            goal=payload.goal,
-            locale=payload.locale,
-            url=str(payload.url)  # Pass URL for page type detection
+        print("[analyze_url_human] Building human decision review...")
+        response_data = await build_human_decision_review(
+            url=str(payload.url),
+            goal=payload.goal or "other",
+            locale=payload.locale or "en"
         )
-        print(f"[analyze_url_human] Found {len(findings.get('findings', {}).get('top_issues', []))} issues")
-        
-        # Extract page type and analysis scope
-        page_type = findings.get("page_context", {}).get("page_type", "unknown")
-        analysis_scope = findings.get("analysis_scope", "ruleset:unknown")
-        print(f"[analyze_url_human] Detected page type: {page_type}, analysis scope: {analysis_scope}")
-        
-        # Apply guardrails to filter invalid recommendations
-        from api.services.recommendation_guardrails import filter_invalid_recommendations
-        findings_filtered = findings.copy()
-        findings_filtered["findings"] = filter_invalid_recommendations(
-            findings.get("findings", {}),
-            page_type,
-            page_map
-        )
-        findings = findings_filtered
-        print(f"[analyze_url_human] Applied guardrails, filtered findings")
-        
-        # Enforce max 3 issues: rank by impact_score or severity, keep top 3
-        findings_dict = findings.get("findings", {})
-        top_issues = findings_dict.get("top_issues", [])
-        if isinstance(top_issues, list) and len(top_issues) > 3:
-            # Rank issues by impact_score (if available) or severity score
-            def get_sort_key(issue: Dict[str, Any]) -> float:
-                if not isinstance(issue, dict):
-                    return 0.0
-                # Prefer impact_score if available
-                if "impact_score" in issue:
-                    return float(issue.get("impact_score", 0.0))
-                # Fall back to final_severity_score
-                if "final_severity_score" in issue:
-                    return float(issue.get("final_severity_score", 0.0))
-                # Fall back to severity mapping
-                severity_map = {"high": 3.0, "medium": 2.0, "low": 1.0}
-                severity = str(issue.get("severity", "medium")).lower()
-                return severity_map.get(severity, 2.0)
-            
-            # Sort descending by impact/severity
-            top_issues_sorted = sorted(top_issues, key=get_sort_key, reverse=True)
-            # Keep only top 3
-            findings_dict["top_issues"] = top_issues_sorted[:3]
-            findings["findings"] = findings_dict
-            print(f"[analyze_url_human] Ranked and filtered to top 3 issues (from {len(top_issues)} total)")
-        
-        # Step 4: Build analysis JSON
-        print("[analyze_url_human] Step 4: Building analysis JSON...")
-        
-        # Create a lightweight capture object for LLM (remove Base64 data URLs to avoid token limit)
-        # Keep only metadata, not the actual screenshot data
-        capture_for_llm = {}
-        if capture:
-            capture_for_llm = {
-                "timestamp_utc": capture.get("timestamp_utc"),
-                "dom": capture.get("dom", {}),
-                "screenshots": {
-                    "desktop": {
-                        "viewport": capture.get("screenshots", {}).get("desktop", {}).get("viewport", {}),
-                        # Remove data URLs - too large for LLM
-                        "screenshot_available": bool(capture.get("screenshots", {}).get("desktop", {}).get("above_the_fold_data_url"))
-                    },
-                    "mobile": {
-                        "viewport": capture.get("screenshots", {}).get("mobile", {}).get("viewport", {}),
-                        # Remove data URLs - too large for LLM
-                        "screenshot_available": bool(capture.get("screenshots", {}).get("mobile", {}).get("above_the_fold_data_url"))
-                    }
-                }
-            }
-        
-        analysis_json = {
-            "schema_version": "1.0",
-            "input": {
-                "url": str(payload.url),
-                "goal": payload.goal,
-                "locale": payload.locale
-            },
-            "page_context": findings.get("page_context", {}),
-            "capture": capture_for_llm,  # Use lightweight version without Base64 data URLs
-            "page_map": page_map,
-            "findings": findings.get("findings", {}),
-            "output_policy": {
-                "no_scores": True,
-                "no_percentages": True,
-                "tone": "direct_human",
-                "max_main_issues": 3
-            },
-        }
-        
-        # Step 5: Generate human report (use locale from payload, default to English)
-        print("[analyze_url_human] Step 5: Generating human report...")
-        # Always use English, ignore locale parameter
-        human_report = await render_human_report(analysis_json, locale="en")
-        print("[analyze_url_human] Report generated successfully")
-        
-        # Count actual issues from findings
-        top_issues = findings.get("findings", {}).get("top_issues", [])
-        actual_issues_count = len(top_issues) if isinstance(top_issues, list) else 0
-        
-        # Count issues in human_report by looking for numbered issues (1., 2., 3., etc.)
-        import re
-        # Pattern to match numbered issues: "1.", "2.", "3." at start of line or after markdown header
-        issue_pattern = re.compile(r'^(\d+)\.\s+\*\*', re.MULTILINE)
-        report_issues = issue_pattern.findall(human_report)
-        report_issues_count = len(report_issues) if report_issues else 0
-        
-        # If counts don't match, log warning but use findings count (source of truth)
-        if report_issues_count != actual_issues_count:
-            logger.warning(f"[analyze_url_human] Issue count mismatch: findings={actual_issues_count}, report={report_issues_count}")
-            print(f"[analyze_url_human] ⚠️ Issue count mismatch: findings={actual_issues_count}, report={report_issues_count}")
         
         print("[analyze_url_human] ✅ Analysis completed successfully")
         
-        # Screenshots now return new structure with desktop and mobile (using data URLs)
-        if not capture:
-            logger.error("[analyze_url_human] Capture is None - screenshots will be missing!")
-            print("[analyze_url_human] ⚠️ WARNING: Capture is None")
-            screenshots_response = {
-                "desktop": {
-                    "above_the_fold_data_url": None,
-                    "full_page_data_url": None,
-                    "viewport": {"width": 1365, "height": 768},
-                    "above_the_fold": None,
-                    "full_page": None,
-                },
-                "mobile": {
-                    "above_the_fold_data_url": None,
-                    "full_page_data_url": None,
-                    "viewport": {"width": 390, "height": 844},
-                    "above_the_fold": None,
-                    "full_page": None,
-                }
-            }
-        else:
-            screenshots_raw = capture.get("screenshots", {})
-            if not screenshots_raw:
-                logger.error("[analyze_url_human] Screenshots missing from capture!")
-                print("[analyze_url_human] ⚠️ WARNING: Screenshots missing from capture")
-                print(f"[analyze_url_human] Capture keys: {list(capture.keys())}")
-            
-            desktop_screenshots = screenshots_raw.get("desktop", {}) if screenshots_raw else {}
-            mobile_screenshots = screenshots_raw.get("mobile", {}) if screenshots_raw else {}
-            
-            # Extract data URLs (new approach - no file system dependency)
-            desktop_atf_data_url = desktop_screenshots.get("above_the_fold_data_url")
-            desktop_full_data_url = desktop_screenshots.get("full_page_data_url")
-            mobile_atf_data_url = mobile_screenshots.get("above_the_fold_data_url")
-            mobile_full_data_url = mobile_screenshots.get("full_page_data_url")
-            
-            # Log screenshot status for debugging
-            print(f"[analyze_url_human] Screenshot status:")
-            print(f"  Desktop ATF: {'✅' if desktop_atf_data_url else '❌'}")
-            print(f"  Desktop Full: {'✅' if desktop_full_data_url else '❌'}")
-            print(f"  Mobile ATF: {'✅' if mobile_atf_data_url else '❌'}")
-            print(f"  Mobile Full: {'✅' if mobile_full_data_url else '❌'}")
-            
-            # Verify data URLs exist and are valid
-            if not desktop_atf_data_url or not desktop_atf_data_url.startswith("data:image/png;base64,"):
-                logger.warning(f"[analyze_url_human] Desktop ATF data URL missing or invalid: {desktop_atf_data_url[:50] if desktop_atf_data_url else 'None'}...")
-            if not desktop_full_data_url or not desktop_full_data_url.startswith("data:image/png;base64,"):
-                logger.warning(f"[analyze_url_human] Desktop Full data URL missing or invalid: {desktop_full_data_url[:50] if desktop_full_data_url else 'None'}...")
-            if not mobile_atf_data_url or not mobile_atf_data_url.startswith("data:image/png;base64,"):
-                logger.warning(f"[analyze_url_human] Mobile ATF data URL missing or invalid: {mobile_atf_data_url[:50] if mobile_atf_data_url else 'None'}...")
-            if not mobile_full_data_url or not mobile_full_data_url.startswith("data:image/png;base64,"):
-                logger.warning(f"[analyze_url_human] Mobile Full data URL missing or invalid: {mobile_full_data_url[:50] if mobile_full_data_url else 'None'}...")
-            
-            # Build screenshot response with data URLs (no file system needed)
-            # Include both new (data_url) and legacy (above_the_fold) fields for frontend compatibility
-            screenshots_response = {
-                "desktop": {
-                    "above_the_fold_data_url": desktop_atf_data_url,
-                    "full_page_data_url": desktop_full_data_url,
-                    "viewport": desktop_screenshots.get("viewport", {"width": 1365, "height": 768}),
-                    # Legacy fields for frontend compatibility (ScreenshotOnlyATF.tsx expects these)
-                    "above_the_fold": desktop_atf_data_url,  # Use data URL as value
-                    "aboveFold": desktop_atf_data_url,  # Alternative field name
-                    "full_page": desktop_full_data_url,
-                },
-                "mobile": {
-                    "above_the_fold_data_url": mobile_atf_data_url,
-                    "full_page_data_url": mobile_full_data_url,
-                    "viewport": mobile_screenshots.get("viewport", {"width": 390, "height": 844}),
-                    # Legacy fields for frontend compatibility
-                    "above_the_fold": mobile_atf_data_url,  # Use data URL as value
-                    "aboveFold": mobile_atf_data_url,  # Alternative field name
-                    "full_page": mobile_full_data_url,
-                }
-            }
-        
-        # Limit response size - don't send full HTML/capture data
-        # But include capture with screenshots for frontend compatibility
-        response_data = {
-            "analysisStatus": "ok",
-            "human_report": human_report,
-            "page_type": page_type,  # Detected page type
-            "analysis_scope": analysis_scope,  # Ruleset used for analysis
-            "summary": {
-                "url": str(payload.url),
-                "goal": payload.goal,
-                "locale": payload.locale,
-                "headlines_count": len(page_map.get("headlines", [])),
-                "ctas_count": len(page_map.get("ctas", [])),
-                "issues_count": actual_issues_count,
-                "quick_wins_count": len(findings.get("findings", {}).get("quick_wins", [])),
-            },
-            "findings": findings.get("findings", {}),
-            "capture_info": {
-                "timestamp": capture.get("timestamp_utc") if capture else None,
-                "screenshots": screenshots_response,
-                "title": capture.get("dom", {}).get("title") if capture else None,
-            },
-            # Add capture object for frontend compatibility (ScreenshotOnlyATF.tsx expects capture.desktop.above_the_fold)
-            "capture": capture if capture else {
-                "timestamp_utc": None,
-                "screenshots": screenshots_response,
-                "dom": {}
-            },
-            "page_map": {
-                "headlines": page_map.get("headlines", []),
-                "ctas": page_map.get("ctas", []),
-                "trust_signals": page_map.get("trust_signals", []),
-            },
-            # Add public screenshots URLs at root level for easy access (new structure)
-            "screenshots": screenshots_response
-        }
-
-        # Build context (brand maturity + page intent)
-        try:
-            from api.brain.context.brand_context import build_context
-            # Extract page text from capture or human_report
-            page_text = ""
-            if capture and capture.get("dom"):
-                page_text = capture.get("dom", {}).get("readable_text_excerpt", "") or capture.get("dom", {}).get("html_excerpt", "")
-            if not page_text and human_report:
-                page_text = human_report[:5000]  # Use first 5000 chars as fallback
-            
-            context = build_context(str(payload.url), page_text, page_map)
-            
-            # Merge context into response
-            response_data["brand_context"] = context["brand_context"]
-            response_data["page_intent"] = context["page_intent"]
-            response_data["page_type"] = context.get("page_type", {
-                "type": "unknown",
-                "confidence": 0.0
-            })
-        except Exception as e:
-            # Don't fail the request if context detection fails - log and continue
-            logger.warning(f"Failed to build context: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
-            # Add default context
-            response_data["brand_context"] = {
-                "brand_maturity": "growth",
-                "confidence": 0.5,
-                "analysis_mode": "standard"
-            }
-            response_data["page_intent"] = {
-                "intent": "unknown",
-                "confidence": 0.5
-            }
-            response_data["page_type"] = {
-                "type": "unknown",
-                "confidence": 0.0
-            }
-            context = response_data  # Use response_data as fallback context
-        
-        # Add signature layers (4 new layers: psychology insight, CTA recommendations, cost of inaction, personas)
-        try:
-            from api.brain.decision_engine.enhancers import build_signature_layers
-            signature_layers = build_signature_layers(response_data)
-            # Merge signature layers into response (backward compatible - new keys only)
-            response_data.update(signature_layers)
-        except Exception as e:
-            # Don't fail the request if enhancers fail - log and continue
-            logger.warning(f"Failed to build signature layers: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
-        
-        # Contextualize verdict for enterprise brands
-        try:
-            from api.brain.decision_engine.contextualizer import contextualize_verdict
-            response_data = contextualize_verdict(response_data, context)
-        except Exception as e:
-            # Don't fail the request if contextualizer fails - log and continue
-            logger.warning(f"Failed to contextualize verdict: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
-        
-        # Apply page-type-specific templates
-        try:
-            from api.brain.decision_engine.templates_by_type import apply_page_type_templates
-            response_data = apply_page_type_templates(response_data, context)
-        except Exception as e:
-            # Don't fail the request if templates fail - log and continue
-            logger.warning(f"Failed to apply page type templates: {e}")
-            import traceback
-            logger.debug(traceback.format_exc())
-
-        # Write analysis memory (Decision Brain memory)
+        # Write analysis memory (Decision Brain memory) - preserve existing memory logging
         try:
             import hashlib
-
-            top_issues = findings.get("findings", {}).get("top_issues", [])
-            # Use data URLs for memory (or None if not available)
+            from api.services.page_extract import extract_page_map
+            
+            # Extract data for memory from response
+            human_report = response_data.get("human_report", "")
+            findings = response_data.get("findings", {})
+            top_issues = findings.get("top_issues", [])
+            page_type = response_data.get("page_type", {})
+            page_type_name = page_type.get("type", "unknown") if isinstance(page_type, dict) else str(page_type)
+            
+            screenshots = response_data.get("screenshots", {})
             screenshots_for_memory = {
-                "desktop_atf": screenshots_response.get("desktop", {}).get("above_the_fold_data_url"),
-                "mobile_atf": screenshots_response.get("mobile", {}).get("above_the_fold_data_url"),
+                "desktop_atf": screenshots.get("desktop", {}).get("above_the_fold_data_url"),
+                "mobile_atf": screenshots.get("mobile", {}).get("above_the_fold_data_url"),
             }
             report_hash = hashlib.sha256((human_report or "").encode("utf-8")).hexdigest()
 
@@ -560,8 +262,8 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
             if log_analysis:
                 analysis_id = log_analysis(
                     url=str(payload.url),
-                    page_type=page_type,
-                    ruleset_version=analysis_scope,
+                    page_type=page_type_name,
+                    ruleset_version="human_report_v2",
                     top_issues=top_issues,
                     screenshots=screenshots_for_memory,
                     decision_probability=None,

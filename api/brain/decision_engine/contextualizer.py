@@ -9,6 +9,78 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+# Forbidden phrases for enterprise/large brands
+FORBIDDEN_TRUST_PHRASES = [
+    "untrustworthy",
+    "lacks trust signals",
+    "feels risky",
+    "no trust",
+    "missing trust signals",
+    "trust signals are missing",
+    "feels unsafe",
+    "sketchy",
+    "unproven",
+    "not trustworthy"
+]
+
+# Safe replacement phrases
+SAFE_REPLACEMENTS = {
+    "untrustworthy": "information density increases cognitive load",
+    "lacks trust signals": "next-step ambiguity",
+    "feels risky": "choice overload / decision paralysis",
+    "no trust": "first-time or price-sensitive visitors may hesitate",
+    "missing trust signals": "next-step ambiguity",
+    "trust signals are missing": "next-step ambiguity",
+    "feels unsafe": "decision friction",
+    "sketchy": "unclear value proposition",
+    "unproven": "needs clarity for first-time visitors",
+    "not trustworthy": "information density creates hesitation"
+}
+
+
+def sanitize_text(text: str, ctx: Dict[str, Any]) -> str:
+    """
+    Sanitize text to remove forbidden trust phrases for enterprise/large brands.
+    
+    Args:
+        text: Text to sanitize
+        ctx: Context dict with brand_context and page_type
+        
+    Returns:
+        Sanitized text
+    """
+    if not text:
+        return text
+    
+    brand_context = ctx.get("brand_context", {})
+    page_type = ctx.get("page_type", {})
+    
+    brand_maturity = brand_context.get("brand_maturity", "startup")
+    page_type_name = page_type.get("type", "unknown")
+    
+    # Apply sanitization if enterprise/growth OR ecommerce
+    should_sanitize = (
+        brand_maturity in ["enterprise", "growth"] or
+        str(page_type_name).startswith("ecommerce_")
+    )
+    
+    if not should_sanitize:
+        return text
+    
+    text_lower = text.lower()
+    sanitized = text
+    
+    # Replace forbidden phrases
+    for forbidden, replacement in SAFE_REPLACEMENTS.items():
+        if forbidden in text_lower:
+            # Case-insensitive replacement
+            import re
+            pattern = re.compile(re.escape(forbidden), re.IGNORECASE)
+            sanitized = pattern.sub(replacement, sanitized)
+            logger.debug(f"Sanitized '{forbidden}' -> '{replacement}' in text")
+    
+    return sanitized
+
 
 def contextualize_verdict(payload: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -38,13 +110,18 @@ def contextualize_verdict(payload: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[
         "text": "This page appears optimized for informed users. Findings below may mainly affect first-time or price-sensitive visitors."
     }
     
+    # Apply hard guards: sanitize all text fields
     # Contextualize human_report/verdict
     if "human_report" in payload:
         human_report = payload["human_report"]
+        # Always sanitize first
+        human_report = sanitize_text(human_report, ctx)
         if intent == "pricing":
             # Reframe pricing page verdicts (always reframe for pricing pages in enterprise mode)
             human_report = _reframe_pricing_verdict(human_report)
-            payload["human_report"] = human_report
+        # Sanitize again after reframing
+        human_report = sanitize_text(human_report, ctx)
+        payload["human_report"] = human_report
     
     # Contextualize decision_psychology_insight
     if "decision_psychology_insight" in payload:
@@ -53,6 +130,10 @@ def contextualize_verdict(payload: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[
             insight = _reframe_pricing_insight(insight)
         elif intent == "docs":
             insight = _reframe_docs_insight(insight)
+        # Sanitize all insight text fields
+        for key in ["headline", "insight", "why_now", "micro_risk_reducer"]:
+            if key in insight:
+                insight[key] = sanitize_text(str(insight[key]), ctx)
         payload["decision_psychology_insight"] = insight
     
     # Contextualize CTA recommendations
@@ -68,6 +149,11 @@ def contextualize_verdict(payload: Dict[str, Any], ctx: Dict[str, Any]) -> Dict[
     if "mindset_personas" in payload:
         personas = payload["mindset_personas"]
         personas = _reframe_enterprise_personas(personas, intent)
+        # Sanitize persona text fields
+        for persona in personas:
+            for key in ["title", "signal", "goal", "best_cta", "next_step"]:
+                if key in persona:
+                    persona[key] = sanitize_text(str(persona[key]), ctx)
         payload["mindset_personas"] = personas
     
     return payload

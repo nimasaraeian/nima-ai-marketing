@@ -89,12 +89,94 @@ def build_signature_layers(report: Dict[str, Any]) -> Dict[str, Any]:
         has_trust_issue, has_pricing_issue, has_cta_competition, has_clarity_issue
     )
     
-    return {
-        "decision_psychology_insight": decision_psychology_insight,
-        "cta_recommendations": cta_recommendations,
-        "cost_of_inaction": cost_of_inaction,
-        "mindset_personas": mindset_personas
+    # Ensure all keys always exist (defensive programming)
+    result = {
+        "decision_psychology_insight": decision_psychology_insight or _get_default_insight(),
+        "cta_recommendations": cta_recommendations or _get_default_cta_recommendations(),
+        "cost_of_inaction": cost_of_inaction or _get_default_cost_of_inaction(),
+        "mindset_personas": mindset_personas or _get_default_personas()
     }
+    
+    # Validate structure
+    if not result["decision_psychology_insight"].get("headline"):
+        result["decision_psychology_insight"] = _get_default_insight()
+    if not result["cta_recommendations"].get("primary"):
+        result["cta_recommendations"] = _get_default_cta_recommendations()
+    if not result["cost_of_inaction"].get("headline"):
+        result["cost_of_inaction"] = _get_default_cost_of_inaction()
+    if not isinstance(result["mindset_personas"], list) or len(result["mindset_personas"]) != 3:
+        result["mindset_personas"] = _get_default_personas()
+    
+    return result
+
+
+def _get_default_insight() -> Dict[str, str]:
+    """Default insight when no data available."""
+    return {
+        "headline": "Decision Friction Detected",
+        "insight": "Multiple subtle friction points are creating hesitation. Users are close to deciding but need one clear path forward.",
+        "why_now": "Small frictions compound. Addressing the primary blocker unlocks the decision pathway.",
+        "micro_risk_reducer": "Focus on the top blocker identified in the analysis. One clear fix will unlock the decision."
+    }
+
+
+def _get_default_cta_recommendations() -> Dict[str, Any]:
+    """Default CTA recommendations when no data available."""
+    return {
+        "primary": {
+            "label": "See Why Users Hesitate",
+            "reason": "Focuses on understanding decision friction"
+        },
+        "secondary": [
+            {"label": "Learn More", "reason": "Low-pressure option for users not ready to commit"}
+        ],
+        "do_not_use": [
+            {"label": "Click Here", "reason": "Generic and provides no value signal or friction reduction"}
+        ]
+    }
+
+
+def _get_default_cost_of_inaction() -> Dict[str, Any]:
+    """Default cost of inaction when no data available."""
+    return {
+        "headline": "What This Is Costing You",
+        "bullets": [
+            "Lower conversion rates from unresolved friction",
+            "Wasted traffic from unclear value proposition",
+            "Reduced ROI from suboptimal conversion funnel"
+        ],
+        "metric_hint": "Track conversion rate, time-to-convert, and bounce rate to measure impact"
+    }
+
+
+def _get_default_personas() -> List[Dict[str, str]]:
+    """Default personas when no data available."""
+    return [
+        {
+            "id": "hesitant",
+            "title": "Hesitant Visitor",
+            "signal": "Risk perception outweighs reward signals",
+            "goal": "Build safety and reduce perceived risk",
+            "best_cta": "See Why Users Hesitate",
+            "next_step": "Add risk reversal mechanisms (guarantees, low-commitment options)"
+        },
+        {
+            "id": "curious",
+            "title": "Curious Evaluator",
+            "signal": "Clarity/value dominant - evaluating fit and value",
+            "goal": "Understand what this is and if it's for them",
+            "best_cta": "Understand Your Options",
+            "next_step": "Improve value proposition clarity in hero section"
+        },
+        {
+            "id": "ready",
+            "title": "Ready-to-Act Buyer",
+            "signal": "CTA/flow/effort dominant - ready to act but needs clear path",
+            "goal": "Clear, friction-free path to action",
+            "best_cta": "Get Started",
+            "next_step": "Optimize CTA placement and reduce friction in conversion flow"
+        }
+    ]
 
 
 def _build_psychology_insight(

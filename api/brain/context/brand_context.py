@@ -30,10 +30,24 @@ KNOWN_ENTERPRISE_DOMAINS = {
     "slack.com",
     "zoom.us",
     "dropbox.com",
-    "salesforce.com",
     "oracle.com",
     "ibm.com",
 }
+
+# Known large ecommerce domains (treated as enterprise/growth-large)
+KNOWN_LARGE_ECOMMERCE_DOMAINS = {
+    "digikala.com",
+    "amazon.com",
+    "alibaba.com",
+    "ebay.com",
+    "walmart.com",
+    "temu.com",
+    "shein.com",
+    "shopify.com",  # Already in enterprise, but also ecommerce
+}
+
+# Combined set for brand maturity detection
+ALL_KNOWN_LARGE_DOMAINS = KNOWN_ENTERPRISE_DOMAINS | KNOWN_LARGE_ECOMMERCE_DOMAINS
 
 
 @dataclass
@@ -216,10 +230,12 @@ def detect_brand_context(
     growth_score = 0.0
     startup_score = 0.0
     
-    # Enterprise signals
-    if domain in KNOWN_ENTERPRISE_DOMAINS:
+    # Enterprise signals (check both enterprise and large ecommerce)
+    if domain in ALL_KNOWN_LARGE_DOMAINS:
         enterprise_score += 5.0
         signals["known_enterprise_domain"] = domain
+        if domain in KNOWN_LARGE_ECOMMERCE_DOMAINS:
+            signals["known_large_ecommerce"] = True
     
     enterprise_keywords = ["enterprise", "compliance", "security", "soc 2", "gdpr", "iso", "developers", "api"]
     enterprise_keyword_matches = sum(1 for kw in enterprise_keywords if kw in page_text_lower)
