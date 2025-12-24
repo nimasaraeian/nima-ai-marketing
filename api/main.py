@@ -228,9 +228,8 @@ async def serve_artifact(filename: str):
         filename=filename
     )
 
-# Mount static file directories (fallback if route handler doesn't match)
-# IMPORTANT: Mounts MUST be defined AFTER route handlers but BEFORE include_router calls
-app.mount("/api/artifacts", StaticFiles(directory=str(ARTIFACTS_DIR)), name="artifacts")
+# Note: We use route handler instead of mount for /api/artifacts to ensure it works in Railway
+# Mount debug_shots directory (static files work fine for this)
 app.mount("/api/debug_shots", StaticFiles(directory=str(DEBUG_SHOTS_DIR)), name="debug_shots")
 
 # Startup event: Log environment configuration (non-blocking)
