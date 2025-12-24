@@ -5,6 +5,7 @@ and generates a human report via OpenAI.
 """
 import sys
 import asyncio
+import os
 from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request, Request as FastAPIRequest
 from fastapi.responses import JSONResponse
