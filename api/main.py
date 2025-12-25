@@ -128,6 +128,8 @@ from api.routes.training_landing_friction import router as landing_friction_trai
 from api.routes.analyze_url import router as analyze_url_router
 from api.routes.analyze_url_human import router as analyze_url_human_router
 from api.routes.analyze_human import router as analyze_human_router
+from api.routes.analyze_image_human import router as analyze_image_human_router
+from api.routes.analyze_text_human import router as analyze_text_human_router
 from api.routes.debug_screenshot import router as debug_screenshot_router
 from api.routes.debug import router as debug_router
 from api.routes.brain_features import router as brain_features_router
@@ -602,6 +604,8 @@ app.include_router(landing_friction_training_router)
 app.include_router(analyze_url_router)
 app.include_router(analyze_url_human_router)
 app.include_router(analyze_human_router)  # Unified intake endpoint
+app.include_router(analyze_image_human_router)  # Image analysis endpoint
+app.include_router(analyze_text_human_router)  # Text analysis endpoint
 app.include_router(debug_screenshot_router)
 app.include_router(debug_router)
 app.include_router(brain_features_router)
