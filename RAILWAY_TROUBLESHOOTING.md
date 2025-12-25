@@ -385,3 +385,9 @@ Invoke-WebRequest "https://your-app.up.railway.app/health" -UseBasicParsing
 
 **آخرین به‌روزرسانی**: تمام مشکلات رایج Railway و راه‌حل‌های آن‌ها ✅
 
+
+
+
+
+
+

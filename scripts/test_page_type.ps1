@@ -126,3 +126,6 @@ foreach ($testCase in $testUrls) {
 Write-Host "`n🎉 Page type detection test completed!" -ForegroundColor Green
 Write-Host "Page types should be correctly detected and CTAs should be context-aware.`n" -ForegroundColor Green
 
+
+
+

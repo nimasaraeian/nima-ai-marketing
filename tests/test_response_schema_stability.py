@@ -12,8 +12,7 @@ class TestResponseSchemaStability(unittest.TestCase):
     @patch('api.brain.decision_engine.human_report_builder.capture_page_artifacts')
     @patch('api.brain.decision_engine.human_report_builder.extract_page_map')
     @patch('api.brain.decision_engine.human_report_builder.run_heuristics')
-    @patch('api.brain.decision_engine.human_report_builder.render_human_report')
-    def test_required_keys_always_exist(self, mock_render, mock_heuristics, mock_extract, mock_capture):
+    def test_required_keys_always_exist(self, mock_heuristics, mock_extract, mock_capture):
         """Test that all required keys always exist in response."""
         # Mock responses
         mock_capture.return_value = {
@@ -50,7 +49,6 @@ class TestResponseSchemaStability(unittest.TestCase):
             "summary": {"goal": "other"}
         }
         
-        mock_render.return_value = "## Verdict\nTest report"
         
         # Call builder (use asyncio.run for sync test)
         import asyncio
@@ -106,8 +104,7 @@ class TestResponseSchemaStability(unittest.TestCase):
     @patch('api.brain.decision_engine.human_report_builder.capture_page_artifacts')
     @patch('api.brain.decision_engine.human_report_builder.extract_page_map')
     @patch('api.brain.decision_engine.human_report_builder.run_heuristics')
-    @patch('api.brain.decision_engine.human_report_builder.render_human_report')
-    def test_fallback_response_has_all_keys(self, mock_render, mock_heuristics, mock_extract, mock_capture):
+    def test_fallback_response_has_all_keys(self, mock_heuristics, mock_extract, mock_capture):
         """Test that fallback response (on error) has all required keys."""
         # Mock to raise exception
         mock_capture.side_effect = Exception("Test error")

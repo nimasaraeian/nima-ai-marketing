@@ -12,8 +12,7 @@ class TestPipelineDebug(unittest.TestCase):
     @patch('api.brain.decision_engine.human_report_builder.capture_page_artifacts')
     @patch('api.brain.decision_engine.human_report_builder.extract_page_map')
     @patch('api.brain.decision_engine.human_report_builder.run_heuristics')
-    @patch('api.brain.decision_engine.human_report_builder.render_human_report')
-    def test_debug_pipeline_version(self, mock_render, mock_heuristics, mock_extract, mock_capture):
+    def test_debug_pipeline_version(self, mock_heuristics, mock_extract, mock_capture):
         """Test that debug.pipeline_version is correct."""
         # Mock responses
         mock_capture.return_value = {
@@ -30,7 +29,6 @@ class TestPipelineDebug(unittest.TestCase):
             "page_context": {"page_type": "unknown"},
             "summary": {"goal": "other"}
         }
-        mock_render.return_value = "## Verdict\nTest"
         
         import asyncio
         response = asyncio.run(build_human_decision_review(
@@ -45,8 +43,7 @@ class TestPipelineDebug(unittest.TestCase):
     @patch('api.brain.decision_engine.human_report_builder.capture_page_artifacts')
     @patch('api.brain.decision_engine.human_report_builder.extract_page_map')
     @patch('api.brain.decision_engine.human_report_builder.run_heuristics')
-    @patch('api.brain.decision_engine.human_report_builder.render_human_report')
-    def test_debug_steps_include_signature_layers(self, mock_render, mock_heuristics, mock_extract, mock_capture):
+    def test_debug_steps_include_signature_layers(self, mock_heuristics, mock_extract, mock_capture):
         """Test that debug.steps includes signature_layers."""
         # Mock responses
         mock_capture.return_value = {
@@ -63,7 +60,6 @@ class TestPipelineDebug(unittest.TestCase):
             "page_context": {"page_type": "unknown"},
             "summary": {"goal": "other"}
         }
-        mock_render.return_value = "## Verdict\nTest"
         
         import asyncio
         response = asyncio.run(build_human_decision_review(
@@ -82,8 +78,7 @@ class TestPipelineDebug(unittest.TestCase):
     @patch('api.brain.decision_engine.human_report_builder.capture_page_artifacts')
     @patch('api.brain.decision_engine.human_report_builder.extract_page_map')
     @patch('api.brain.decision_engine.human_report_builder.run_heuristics')
-    @patch('api.brain.decision_engine.human_report_builder.render_human_report')
-    def test_debug_includes_context_info(self, mock_render, mock_heuristics, mock_extract, mock_capture):
+    def test_debug_includes_context_info(self, mock_heuristics, mock_extract, mock_capture):
         """Test that debug includes context information."""
         # Mock responses
         mock_capture.return_value = {
@@ -100,7 +95,6 @@ class TestPipelineDebug(unittest.TestCase):
             "page_context": {"page_type": "unknown"},
             "summary": {"goal": "other"}
         }
-        mock_render.return_value = "## Verdict\nTest"
         
         import asyncio
         response = asyncio.run(build_human_decision_review(

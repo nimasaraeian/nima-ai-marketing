@@ -103,3 +103,9 @@ Invoke-WebRequest "https://nima-ai-marketing-production-82df.up.railway.app/heal
 
 **آخرین به‌روزرسانی**: مشکل PORT به طور کامل حل شد ✅
 
+
+
+
+
+
+

@@ -173,3 +173,9 @@ Invoke-WebRequest "https://nima-ai-marketing-production.up.railway.app/" -UseBas
 
 **آخرین به‌روزرسانی**: تمام مشکلات Railway deployment حل شده است ✅
 
+
+
+
+
+
+

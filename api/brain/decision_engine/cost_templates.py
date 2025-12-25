@@ -103,3 +103,6 @@ def build_cost_of_inaction(page_type: str) -> Dict[str, Any]:
         "metric_hint": "Track conversion rate, time-to-convert, and bounce rate to measure impact"
     }
 
+
+
+

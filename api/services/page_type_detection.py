@@ -181,3 +181,7 @@ def get_applicable_rules_for_page_type(page_type: PageType) -> Dict[str, Any]:
     return page_type_rules.get(page_type, universal_rules)
 
 
+
+
+
+

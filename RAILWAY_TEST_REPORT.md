@@ -158,3 +158,9 @@ Invoke-WebRequest "https://nima-ai-marketing-production-82df.up.railway.app/heal
 
 **نکته**: اگر بعد از بررسی لاگ‌ها و انجام مراحل بالا هنوز مشکل دارید، لاگ‌های Railway را برای بررسی بیشتر ارسال کنید.
 
+
+
+
+
+
+

@@ -135,3 +135,9 @@ fetch('https://nima-ai-marketing-production-82df.up.railway.app/health')
 
 URL جدید Railway: `https://nima-ai-marketing-production-82df.up.railway.app`
 
+
+
+
+
+
+

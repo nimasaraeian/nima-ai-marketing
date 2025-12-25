@@ -44,3 +44,9 @@ def test_local_visual_extractor_basic():
 
 
 
+
+
+
+
+
+

@@ -151,9 +151,9 @@ def _capture_viewport_sync(
             
             try:
                 # Try with domcontentloaded first (faster, but may miss some content)
-                page.goto(
-                    url,
-                    wait_until="domcontentloaded",
+            page.goto(
+                url,
+                wait_until="domcontentloaded",
                     timeout=navigation_timeout
                 )
             except PlaywrightTimeoutError:
@@ -172,7 +172,7 @@ def _capture_viewport_sync(
                         url,
                         wait_until="commit",
                         timeout=min(navigation_timeout, 30000)  # Cap at 30s for commit
-                    )
+            )
                     # Give it some time for basic content to load
                     page.wait_for_timeout(3000)
             
@@ -244,10 +244,10 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
         # Capture desktop screenshots (also extract HTML/title/readable from desktop)
         try:
             html, title, readable, desktop_atf_bytes, desktop_full_bytes = await loop.run_in_executor(
-                None,  # Use default executor (ThreadPoolExecutor)
-                _capture_viewport_sync,
+            None,  # Use default executor (ThreadPoolExecutor)
+            _capture_viewport_sync,
                 url, desktop_viewport, False
-            )
+        )
         except Exception as desktop_error:
             logger.error(f"Desktop capture failed for {url}: {desktop_error}")
             # If desktop fails, try to continue with mobile only
@@ -264,8 +264,8 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
         # Capture mobile screenshots (don't extract content again, use desktop)
         try:
             _, _, _, mobile_atf_bytes, mobile_full_bytes = await loop.run_in_executor(
-                None,
-                _capture_viewport_sync,
+            None,
+            _capture_viewport_sync,
                 url, mobile_viewport, True
             )
         except Exception as mobile_error:

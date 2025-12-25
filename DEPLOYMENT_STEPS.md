@@ -131,3 +131,9 @@ Once deployed correctly:
 2. Share the output of: `curl https://your-app-url/health`
 3. Check if there are any platform-specific requirements we're missing
 
+
+
+
+
+
+

@@ -145,3 +145,6 @@ def test_cost_differ_by_page_type():
     # Ecommerce should focus on conversion metrics
     assert "conversion rate" in ecommerce_cost["bullets"][0].lower() or "cart abandonment" in ecommerce_cost["bullets"][1].lower()
 
+
+
+

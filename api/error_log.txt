@@ -195,3 +195,33 @@ Traceback (most recent call last):
 NameError: name 'decision_logic' is not defined
 
 ============================================================
+
+============================================================
+Error in analyze_url_human: Exception: Playwright error while capturing https://www.selphlyze.com/: AttributeError: 'PlaywrightContextManager' object has no attribute '_playwright'
+Traceback:
+Traceback (most recent call last):
+  File "N:\nima-ai-marketing\api\services\page_capture.py", line 218, in capture_page_artifacts
+    html, title, readable, desktop_atf_bytes, desktop_full_bytes = await loop.run_in_executor(
+                                                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Programs\Python\Python312\Lib\concurrent\futures\thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "N:\nima-ai-marketing\api\services\page_capture.py", line 115, in _capture_viewport_sync
+    with sync_playwright() as p:
+         ^^^^^^^^^^^^^^^^^
+  File "C:\Users\USER\AppData\Local\Programs\Python\Python312\Lib\site-packages\playwright\sync_api\_context_manager.py", line 79, in __enter__
+    playwright = self._playwright
+                 ^^^^^^^^^^^^^^^^
+AttributeError: 'PlaywrightContextManager' object has no attribute '_playwright'
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "N:\nima-ai-marketing\api\routes\analyze_url_human.py", line 232, in analyze_url_human
+    capture = await capture_page_artifacts(str(payload.url))
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "N:\nima-ai-marketing\api\services\page_capture.py", line 262, in capture_page_artifacts
+    raise Exception(error_msg) from e
+Exception: Playwright error while capturing https://www.selphlyze.com/: AttributeError: 'PlaywrightContextManager' object has no attribute '_playwright'
+
+============================================================

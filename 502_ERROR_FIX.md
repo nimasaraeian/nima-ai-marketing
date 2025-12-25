@@ -143,3 +143,9 @@ If the 502 error persists after these fixes:
 - `Dockerfile` - Updated to use PORT environment variable and startup script
 - `start.sh` - New startup script for better error handling
 
+
+
+
+
+
+
