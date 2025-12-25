@@ -127,10 +127,29 @@ from api.routes.image_trust import router as image_trust_router
 from api.routes.training_landing_friction import router as landing_friction_training_router
 from api.routes.analyze_url import router as analyze_url_router
 from api.routes.analyze_url_human import router as analyze_url_human_router
+from api.routes.analyze_human import router as analyze_human_router
 from api.routes.debug_screenshot import router as debug_screenshot_router
 from api.routes.debug import router as debug_router
 from api.routes.brain_features import router as brain_features_router
 from api.routes.explain import router as explain_router
+
+# Import evidence router
+try:
+    from api.routes.evidence import router as evidence_router
+except ImportError:
+    evidence_router = None
+
+# Import proxy router
+try:
+    from api.routes.proxy import router as proxy_router
+except ImportError:
+    proxy_router = None
+
+# Import decision scan router
+try:
+    from api.routes.decision_scan import router as decision_scan_router
+except ImportError:
+    decision_scan_router = None
 
 # Optional import for brain_memory router (may not be available in all environments)
 try:
@@ -582,6 +601,7 @@ app.include_router(image_trust_local_router)
 app.include_router(landing_friction_training_router)
 app.include_router(analyze_url_router)
 app.include_router(analyze_url_human_router)
+app.include_router(analyze_human_router)  # Unified intake endpoint
 app.include_router(debug_screenshot_router)
 app.include_router(debug_router)
 app.include_router(brain_features_router)
@@ -593,6 +613,12 @@ app.include_router(
     prefix="/api/brain",
     tags=["Decision Engine"]
 )
+if evidence_router:
+    app.include_router(evidence_router)
+if proxy_router:
+    app.include_router(proxy_router)
+if decision_scan_router:
+    app.include_router(decision_scan_router)
 
 
 # ====================================================

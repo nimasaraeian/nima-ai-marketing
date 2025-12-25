@@ -206,6 +206,9 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
     """
     Analyze a URL and generate a human-readable report.
     
+    DEPRECATED: This endpoint now internally calls the unified /api/analyze/human endpoint.
+    For new integrations, use /api/analyze/human directly.
+    
     Process:
     1. Capture page with Playwright (screenshots + DOM)
     2. Extract structured data (H1/H2, CTAs, trust signals)
@@ -226,10 +229,42 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         print(f"\n[analyze_url_human] Starting analysis for URL: {payload.url}")
         print(f"[analyze_url_human] Goal: {payload.goal}, Locale: {payload.locale}")
         
-        # Use single builder function (enforces correct pipeline ordering)
+        # DEPRECATION: Call unified intake pipeline internally
+        try:
+            from api.services.intake.unified_intake import build_page_map
+            from api.services.decision.report_from_map import report_from_page_map
+            
+            # Build PageMap from URL
+            page_map = await build_page_map(
+                url=payload.url,
+                image_bytes=None,
+                text=None,
+                goal=payload.goal or "other"
+            )
+            
+            # Generate report from PageMap
+            unified_report = await report_from_page_map(page_map)
+            
+            # Convert to legacy format
+            response_data = {
+                "human_report": unified_report.get("human_report", ""),
+                "summary": unified_report.get("summary", ""),
+                "findings": unified_report.get("findings", {}),
+                "debug": unified_report.get("debug", {}),
+                "page_type": unified_report.get("page_type", {}),
+                "screenshots": unified_report.get("screenshots", {})
+            }
+            
+            print("[analyze_url_human] ✅ Analysis completed via unified endpoint")
+            # Continue to memory logging below
+        except Exception as unified_error:
+            logger.warning(f"Unified endpoint failed, falling back to legacy: {unified_error}")
+            # Fall through to legacy implementation
+        
+        # LEGACY FALLBACK: Use original builder
         from api.brain.decision_engine.human_report_builder import build_human_decision_review
         
-        print("[analyze_url_human] Building human decision review...")
+        print("[analyze_url_human] Building human decision review (legacy fallback)...")
         response_data = await build_human_decision_review(
             url=str(payload.url),
             goal=payload.goal or "other",
