@@ -68,6 +68,17 @@ async def analyze_text_human(
         # Generate report using canonical builder (SAME as URL)
         try:
             from api.services.decision.report_builder import build_human_report_from_page_map
+        except ImportError as e:
+            logger.error(f"Failed to import report_builder: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "status": "error",
+                    "stage": "import",
+                    "message": f"Report builder module not available: {str(e)}. Please ensure api/services/decision/__init__.py exists."
+                }
+            )
+        try:
             
             report = await build_human_report_from_page_map(
                 page_map=page_map,

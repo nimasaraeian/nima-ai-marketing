@@ -231,7 +231,18 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         
         # Use canonical report builder (SAME as image/text)
         from api.services.intake.unified_intake import build_page_map
-        from api.services.decision.report_builder import build_human_report_from_page_map
+        try:
+            from api.services.decision.report_builder import build_human_report_from_page_map
+        except ImportError as e:
+            logger.error(f"Failed to import report_builder: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "status": "error",
+                    "stage": "import",
+                    "message": f"Report builder module not available: {str(e)}. Please ensure api/services/decision/__init__.py exists."
+                }
+            )
         
         # Build PageMap from URL
         page_map = await build_page_map(
