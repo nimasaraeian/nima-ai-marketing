@@ -85,6 +85,41 @@ def _prepare_page_for_atf(page):
         page.wait_for_timeout(200)
 
 
+def _validate_url(url: str) -> bool:
+    """
+    Validate URL before attempting capture.
+    Returns True if URL is valid, False otherwise.
+    """
+    if not url or not isinstance(url, str):
+        return False
+    
+    url = url.strip()
+    
+    # Must start with http:// or https://
+    if not url.startswith(("http://", "https://")):
+        return False
+    
+    # Check for common invalid patterns
+    invalid_patterns = [
+        "placeholder.local",
+        "localhost",
+        "127.0.0.1",
+        "0.0.0.0",
+        "::1",
+    ]
+    
+    # Allow localhost only if explicitly allowed (for development)
+    if any(pattern in url.lower() for pattern in invalid_patterns):
+        # Check if it's a real localhost URL (not placeholder)
+        if "placeholder" in url.lower():
+            return False
+        # For other localhost patterns, allow only in development
+        if os.getenv("ENVIRONMENT") == "production":
+            return False
+    
+    return True
+
+
 def _capture_viewport_sync(
     url: str, 
     viewport: dict,
@@ -105,6 +140,12 @@ def _capture_viewport_sync(
         Tuple of (html, title, readable, atf_bytes, full_bytes)
     """
     from playwright.sync_api import sync_playwright
+    
+    # Validate URL before attempting capture
+    if not _validate_url(url):
+        error_msg = f"Invalid URL: {url} (placeholder or invalid domain)"
+        logger.warning(error_msg)
+        raise ValueError(error_msg)
     
     html = ""
     title = ""
@@ -151,9 +192,9 @@ def _capture_viewport_sync(
             
             try:
                 # Try with domcontentloaded first (faster, but may miss some content)
-            page.goto(
-                url,
-                wait_until="domcontentloaded",
+                page.goto(
+                    url,
+                    wait_until="domcontentloaded",
                     timeout=navigation_timeout
                 )
             except PlaywrightTimeoutError:
@@ -202,7 +243,14 @@ def _capture_viewport_sync(
             page.close()
             context.close()
         except Exception as e:
-            logger.exception(f"Error during page capture for {url} (mobile={is_mobile}): {e}")
+            error_str = str(e)
+            # Check if it's a network resolution error (expected for invalid URLs)
+            if "ERR_NAME_NOT_RESOLVED" in error_str or "net::" in error_str:
+                # Log as warning (not error) for expected network errors
+                logger.warning(f"Network error for {url} (mobile={is_mobile}): {error_str}")
+            else:
+                # Log full traceback only for unexpected errors
+                logger.exception(f"Error during page capture for {url} (mobile={is_mobile}): {e}")
             raise
         finally:
             browser.close()
@@ -249,7 +297,13 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
                 url, desktop_viewport, False
         )
         except Exception as desktop_error:
-            logger.error(f"Desktop capture failed for {url}: {desktop_error}")
+            error_str = str(desktop_error)
+            # Check if it's a network resolution error (expected for invalid URLs)
+            if "ERR_NAME_NOT_RESOLVED" in error_str or "net::" in error_str:
+                # Log as warning (not error) for expected network errors
+                logger.warning(f"Desktop capture failed for {url}: {error_str}")
+            else:
+                logger.error(f"Desktop capture failed for {url}: {desktop_error}")
             # If desktop fails, try to continue with mobile only
             # Set empty defaults
             html = ""
@@ -257,8 +311,8 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
             readable = ""
             desktop_atf_bytes = b""
             desktop_full_bytes = b""
-            # Re-raise if it's a critical error (not just timeout)
-            if "Timeout" not in str(desktop_error):
+            # Re-raise if it's a critical error (not just timeout or network error)
+            if "Timeout" not in error_str and "ERR_NAME_NOT_RESOLVED" not in error_str and "net::" not in error_str:
                 raise
         
         # Capture mobile screenshots (don't extract content again, use desktop)
@@ -269,12 +323,18 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
                 url, mobile_viewport, True
             )
         except Exception as mobile_error:
-            logger.error(f"Mobile capture failed for {url}: {mobile_error}")
+            error_str = str(mobile_error)
+            # Check if it's a network resolution error (expected for invalid URLs)
+            if "ERR_NAME_NOT_RESOLVED" in error_str or "net::" in error_str:
+                # Log as warning (not error) for expected network errors
+                logger.warning(f"Mobile capture failed for {url}: {error_str}")
+            else:
+                logger.error(f"Mobile capture failed for {url}: {mobile_error}")
             # Set empty defaults if mobile fails
             mobile_atf_bytes = b""
             mobile_full_bytes = b""
-            # Re-raise if it's a critical error (not just timeout)
-            if "Timeout" not in str(mobile_error):
+            # Re-raise if it's a critical error (not just timeout or network error)
+            if "Timeout" not in error_str and "ERR_NAME_NOT_RESOLVED" not in error_str and "net::" not in error_str:
                 raise
         
         # Safety logs: verify screenshot bytes
@@ -305,11 +365,17 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
         mobile_full_data_url = png_bytes_to_data_url(mobile_full_bytes)
         
     except Exception as e:
-        # Log exception with full traceback
-        logger.exception(f"Playwright error while capturing {url}: {type(e).__name__}: {str(e)}")
+        error_str = str(e)
+        # Check if it's a network resolution error (expected for invalid URLs)
+        if "ERR_NAME_NOT_RESOLVED" in error_str or "net::" in error_str:
+            # Log as warning (not error) for expected network errors, without full traceback
+            logger.warning(f"Playwright network error while capturing {url}: {error_str}")
+            error_msg = f"Playwright error while capturing {url}: {error_str}"
+        else:
+            # Log full traceback only for unexpected errors
+            logger.exception(f"Playwright error while capturing {url}: {type(e).__name__}: {error_str}")
+            error_msg = f"Playwright error while capturing {url}: {type(e).__name__}: {error_str}"
         # Re-raise with more context
-        error_msg = f"Playwright error while capturing {url}: {type(e).__name__}: {str(e)}"
-        print(f"❌ {error_msg}")
         raise Exception(error_msg) from e
     
     # Keep excerpts to avoid huge payloads
