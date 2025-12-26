@@ -337,7 +337,8 @@ export async function POST(req: Request) {
       const humanReport = responseJson.human_report || responseJson.report || "";
       
       // Validation 1: human_report must exist and be non-empty
-      if (!humanReport || humanReport.trim().length === 0) {
+      if (!humanReport || (typeof humanReport === "string" && humanReport.trim().length === 0)) {
+        console.warn("[Proxy] Backend returned empty report");
         return Response.json(
           {
             status: "error",
@@ -352,8 +353,9 @@ export async function POST(req: Request) {
         );
       }
       
-      // Validation 2: human_report must be at least 200 characters
-      if (humanReport.trim().length < 200) {
+      // Validation 2: human_report must be at least 200 characters (only if it's a string)
+      if (typeof humanReport === "string" && humanReport.trim().length < 200) {
+        console.warn(`[Proxy] Backend returned report too short: ${humanReport.trim().length} chars`);
         return Response.json(
           {
             status: "error",
