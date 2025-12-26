@@ -216,8 +216,12 @@ export async function POST(req: Request) {
   let backendUsed = BACKEND;
 
   try {
+    console.log(`[Proxy] Forwarding to unified endpoint: ${backendEndpoint}, mode: ${mode}`);
     response = await fetch(backendEndpoint, fetchOptions);
     clearTimeout(timeoutId); // Clear timeout on success
+    
+    // Log response status for debugging
+    console.log(`[Proxy] Backend response status: ${response.status}`);
   } catch (error: any) {
     clearTimeout(timeoutId); // Clear timeout on error
     // Fallback to localhost if production fails
@@ -270,14 +274,27 @@ export async function POST(req: Request) {
   }
 
   // 4) Return backend response transparently with validation
-  const responseText = await response.text();
+  let responseText: string;
+  try {
+    responseText = await response.text();
+  } catch (e) {
+    console.error(`[Proxy] Failed to read response text: ${e}`);
+    return Response.json(
+      {
+        status: "error",
+        stage: "response_read",
+        message: "Failed to read backend response",
+      },
+      { status: 500 }
+    );
+  }
   
   // Parse response to check for fake reports
   try {
     const responseJson: HumanAnalyzeResponse = JSON.parse(responseText);
     
     // Debug log for smoke test
-    console.log("Unified response keys:", Object.keys(responseJson));
+    console.log("[Proxy] Unified response keys:", Object.keys(responseJson));
     
     // If status is error, pass through cleanly (DO NOT construct fallback payload)
     if (responseJson.status === "error") {
