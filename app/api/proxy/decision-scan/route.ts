@@ -1,3 +1,46 @@
+// Type definitions for unified human analysis response
+type HumanAnalyzeResponse = {
+  status: "ok" | "error";
+  mode: "url" | "image" | "text";
+  goal: string;
+  human_report: string;
+  page_map?: any;
+  summary?: {
+    url?: string | null;
+    goal: string;
+    locale: string;
+    headlines_count?: number;
+    ctas_count?: number;
+    issues_count?: number;
+    quick_wins_count?: number;
+  };
+  issues?: Array<{
+    title?: string;
+    problem?: string;
+    why_it_hurts?: string;
+    location?: string;
+    fix?: string;
+    severity?: string;
+  }>;
+  quick_wins?: Array<{
+    action: string;
+    where?: { section?: string; selector?: string };
+    reason?: string;
+  }>;
+  issues_count?: number;
+  quick_wins_count?: number;
+  screenshots?: any;
+  debug?: any;
+  // Legacy fields for backward compatibility
+  report?: string;
+  findings?: {
+    top_issues?: any[];
+    quick_wins?: any[];
+  };
+  decision_psychology_insight?: any;
+  cta_recommendations?: any;
+};
+
 export async function POST(req: Request) {
   // 🔧 For local development: prioritize localhost
   const USE_LOCAL = process.env.NEXT_PUBLIC_USE_LOCAL_BACKEND === "true" || 
@@ -116,8 +159,8 @@ export async function POST(req: Request) {
     }
   }
 
-  // 2) Route to correct backend endpoint
-  let backendEndpoint = "";
+  // 2) Route to unified backend endpoint
+  const backendEndpoint = `${BACKEND}/api/analyze/human`;
   
   // Create AbortController for timeout
   const controller = new AbortController();
@@ -128,57 +171,45 @@ export async function POST(req: Request) {
     signal: controller.signal,
   };
 
+  // Build FormData for unified endpoint (always use multipart/form-data)
+  const unifiedFormData = new FormData();
+  unifiedFormData.append("goal", goal);
+  unifiedFormData.append("locale", locale);
+  
   if (mode === "image") {
-    backendEndpoint = `${BACKEND}/api/analyze/image-human`;
-    
     if (isMultipart && formData) {
-      // Forward FormData directly (DO NOT set Content-Type - let fetch handle boundary)
-      fetchOptions.body = formData;
-      // DO NOT set Content-Type header - browser will set it with boundary
-    } else {
-      // JSON mode with image (base64 or URL)
-      fetchOptions.headers = { "Content-Type": "application/json" };
-      fetchOptions.body = JSON.stringify({
-        image: jsonBody.image || jsonBody.file,
-        goal: goal,
-        locale: locale
-      });
+      const imageFile = formData.get("image") || formData.get("file");
+      if (imageFile && imageFile instanceof File) {
+        unifiedFormData.append("image", imageFile);
+      }
+    } else if (jsonBody.image || jsonBody.file) {
+      // JSON mode with image - convert to File if possible, or skip
+      // Note: base64 images would need special handling, but unified endpoint expects File
+      console.warn("[Proxy] JSON image mode not fully supported - use multipart/form-data");
     }
   } else if (mode === "text") {
-    backendEndpoint = `${BACKEND}/api/analyze/text-human`;
-    
     if (isMultipart && formData) {
-      // Forward FormData directly
-      fetchOptions.body = formData;
-    } else {
-      fetchOptions.headers = { "Content-Type": "application/json" };
-      fetchOptions.body = JSON.stringify({
-        text: jsonBody.text,
-        goal: goal,
-        locale: locale
-      });
+      const textField = formData.get("text");
+      if (textField) {
+        unifiedFormData.append("text", String(textField));
+      }
+    } else if (jsonBody.text) {
+      unifiedFormData.append("text", String(jsonBody.text));
     }
   } else {
     // URL mode
-    backendEndpoint = `${BACKEND}/api/analyze/url-human`;
-    
     if (isMultipart && formData) {
-      // Convert FormData to JSON for URL endpoint (it expects JSON)
-      fetchOptions.headers = { "Content-Type": "application/json" };
-      fetchOptions.body = JSON.stringify({
-        url: formData.get("url"),
-        goal: goal,
-        locale: locale
-      });
-    } else {
-      fetchOptions.headers = { "Content-Type": "application/json" };
-      fetchOptions.body = JSON.stringify({
-        url: jsonBody.url,
-        goal: goal,
-        locale: locale
-      });
+      const urlField = formData.get("url");
+      if (urlField) {
+        unifiedFormData.append("url", String(urlField));
+      }
+    } else if (jsonBody.url) {
+      unifiedFormData.append("url", String(jsonBody.url));
     }
   }
+  
+  // Always use FormData for unified endpoint (DO NOT set Content-Type - browser will set boundary)
+  fetchOptions.body = unifiedFormData;
 
   // 3) Make request with fallback
   let response: Response;
@@ -238,36 +269,42 @@ export async function POST(req: Request) {
     }
   }
 
-  // 4) Return backend response transparently
+  // 4) Return backend response transparently with validation
   const responseText = await response.text();
   
   // Parse response to check for fake reports
   try {
-    const responseJson = JSON.parse(responseText);
+    const responseJson: HumanAnalyzeResponse = JSON.parse(responseText);
     
-    // If status is error, validate it doesn't contain fake report content
+    // Debug log for smoke test
+    console.log("Unified response keys:", Object.keys(responseJson));
+    
+    // If status is error, pass through cleanly (DO NOT construct fallback payload)
     if (responseJson.status === "error") {
+      // Validate error response doesn't contain fake report content
       const humanReport = responseJson.human_report || responseJson.report || "";
-      const fakeMarkers = ["CTA Recommendations", "Personas", "Decision Friction"];
-      const hasFakeMarkers = fakeMarkers.some(marker => humanReport.includes(marker));
-      
-      if (hasFakeMarkers) {
-        // Error response should not contain report content
-        return Response.json(
-          {
-            status: "error",
-            stage: "report_validation",
-            message: "Error response contains invalid report content. Please try again.",
-            debug: {
-              mode: mode,
-              endpoint: backendEndpoint,
+      if (humanReport && humanReport.trim().length > 0) {
+        // Error responses should not contain report content
+        const fakeMarkers = ["CTA Recommendations", "Personas", "Decision Friction"];
+        const hasFakeMarkers = fakeMarkers.some(marker => humanReport.includes(marker));
+        
+        if (hasFakeMarkers) {
+          return Response.json(
+            {
+              status: "error",
+              stage: "proxy_report_validation",
+              message: "Backend error response contains invalid report content.",
+              details: {
+                mode: mode,
+                endpoint: backendEndpoint,
+              },
             },
-          },
-          { status: 500 }
-        );
+            { status: 500 }
+          );
+        }
       }
       
-      // Error responses without fake content are OK - return as-is
+      // Clean error response - pass through as-is
       return new Response(responseText, {
         status: response.status,
         headers: {
@@ -278,49 +315,119 @@ export async function POST(req: Request) {
       });
     }
     
-    // For success responses, check for empty/null reports
-    const humanReport = responseJson.human_report || responseJson.report || "";
-    
-    // Check for null report field
-    if (responseJson.report === null && !responseJson.human_report) {
-      return Response.json(
-        {
-          status: "error",
-          stage: "report_validation",
-          message: "Backend returned null report. Please try again.",
-          debug: {
-            mode: mode,
-            endpoint: backendEndpoint,
+    // For success responses, STRICT validation
+    if (responseJson.status === "ok") {
+      const humanReport = responseJson.human_report || responseJson.report || "";
+      
+      // Validation 1: human_report must exist and be non-empty
+      if (!humanReport || humanReport.trim().length === 0) {
+        return Response.json(
+          {
+            status: "error",
+            stage: "proxy_report_validation",
+            message: "Backend returned empty report. Please try again.",
+            details: {
+              mode: mode,
+              endpoint: backendEndpoint,
+            },
           },
-        },
-        { status: 500 }
-      );
-    }
-    
-    // Check for empty report
-    if (!humanReport || humanReport.trim().length === 0) {
-      return Response.json(
-        {
-          status: "error",
-          stage: "report_validation",
-          message: "Backend returned empty report. Please try again.",
-          debug: {
-            mode: mode,
-            endpoint: backendEndpoint,
+          { status: 500 }
+        );
+      }
+      
+      // Validation 2: human_report must be at least 200 characters
+      if (humanReport.trim().length < 200) {
+        return Response.json(
+          {
+            status: "error",
+            stage: "proxy_report_validation",
+            message: `Backend returned report too short (${humanReport.trim().length} chars, minimum 200).`,
+            details: {
+              mode: mode,
+              endpoint: backendEndpoint,
+            },
           },
-        },
-        { status: 500 }
-      );
-    }
-    
-    // Check for fake content without corresponding data structures
-    const hasFakeContent = 
-      (humanReport.includes("CTA Recommendations") && !responseJson.cta_recommendations) ||
-      (humanReport.includes("Personas") && !responseJson.mindset_personas);
-    
-    if (hasFakeContent) {
-      console.warn(`[Proxy] Detected fake content in report for mode: ${mode}`);
-      // Don't block, but log warning
+          { status: 500 }
+        );
+      }
+      
+      // Validation 3: Check for null report field
+      if (responseJson.report === null && !responseJson.human_report) {
+        return Response.json(
+          {
+            status: "error",
+            stage: "proxy_report_validation",
+            message: "Backend returned null report. Please try again.",
+            details: {
+              mode: mode,
+              endpoint: backendEndpoint,
+            },
+          },
+          { status: 500 }
+        );
+      }
+      
+      // Validation 4: Check for fake template markers
+      const fakeMarkers = {
+        headline: "Decision Friction Detected",
+        primary_cta: "See Why Users Hesitate",
+        secondary_cta: "Learn More"
+      };
+      
+      // Check decision_psychology_insight
+      const insight = responseJson.decision_psychology_insight;
+      if (insight && typeof insight === "object" && insight.headline === fakeMarkers.headline) {
+        return Response.json(
+          {
+            status: "error",
+            stage: "fake_report_detected",
+            message: "Fake template detected: decision_psychology_insight.headline == 'Decision Friction Detected'",
+            details: {
+              mode: mode,
+              endpoint: backendEndpoint,
+            },
+          },
+          { status: 500 }
+        );
+      }
+      
+      // Check CTA recommendations
+      const ctaRecs = responseJson.cta_recommendations;
+      if (ctaRecs && typeof ctaRecs === "object") {
+        if (ctaRecs.primary && ctaRecs.primary.label === fakeMarkers.primary_cta) {
+          return Response.json(
+            {
+              status: "error",
+              stage: "fake_report_detected",
+              message: "Fake template detected: primary CTA label == 'See Why Users Hesitate'",
+              details: {
+                mode: mode,
+                endpoint: backendEndpoint,
+              },
+            },
+            { status: 500 }
+          );
+        }
+        
+        if (Array.isArray(ctaRecs.secondary)) {
+          for (const sec of ctaRecs.secondary) {
+            if (sec && sec.label === fakeMarkers.secondary_cta) {
+              return Response.json(
+                {
+                  status: "error",
+                  stage: "fake_report_detected",
+                  message: "Fake template detected: secondary CTA label == 'Learn More'",
+                  details: {
+                    mode: mode,
+                    endpoint: backendEndpoint,
+                  },
+                },
+                { status: 500 }
+              );
+            }
+          }
+        }
+      }
     }
   } catch (e) {
     // If response is not JSON, return as-is (might be HTML error page)

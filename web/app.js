@@ -1167,43 +1167,71 @@ function showUrlAnalysisResults(result) {
     modal.style.display = 'block';
 }
 
+// Unified analysis helper function
+async function analyzeHuman(formData) {
+    // Build FormData for unified endpoint
+    const unifiedFormData = new FormData();
+    
+    // Always include goal (default "leads")
+    const goal = formData.get('goal') || 'leads';
+    unifiedFormData.append('goal', goal);
+    
+    // Locale (default "en")
+    const locale = formData.get('locale') || 'en';
+    unifiedFormData.append('locale', locale);
+    
+    // Determine mode and add appropriate field
+    const url = formData.get('url');
+    const text = formData.get('text');
+    const image = formData.get('image') || formData.get('file');
+    
+    if (url && url.trim()) {
+        unifiedFormData.append('url', url.trim());
+    } else if (image && image instanceof File) {
+        unifiedFormData.append('image', image);
+    } else if (text && text.trim()) {
+        unifiedFormData.append('text', text.trim());
+    } else {
+        throw new Error('Please provide URL, image, or text');
+    }
+    
+    // Call unified endpoint
+    const response = await fetch(`${API_BASE_URL}/api/analyze/human`, {
+        method: 'POST',
+        body: unifiedFormData
+        // DO NOT set Content-Type - browser will set it with boundary
+    });
+    
+    if (!response.ok) {
+        const errorInfo = await parseErrorResponse(response);
+        throw new Error(errorInfo.message || `خطای ${response.status}`);
+    }
+    
+    const result = await response.json();
+    
+    // Debug log
+    console.log('Unified response keys:', Object.keys(result));
+    
+    // Validate response
+    if (result.status !== 'ok') {
+        throw new Error(result.message || 'Analysis failed');
+    }
+    
+    return result;
+}
+
 // Human Decision Review submission
 async function submitHumanDecisionReview(event) {
     event.preventDefault();
     
     const form = event.target;
     const formData = new FormData(form);
-    const url = formData.get('url');
-    const goal = formData.get('goal') || 'other';
-    const locale = formData.get('locale') || 'en';
-    
-    if (!url) {
-        alert('Please enter a URL');
-        return;
-    }
     
     // Show loading overlay
     document.getElementById('loadingOverlay').classList.add('active');
     
     try {
-        const response = await fetch(`${API_BASE_URL}/api/analyze/url-human`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                url: url,
-                goal: goal,
-                locale: locale
-            })
-        });
-        
-        if (!response.ok) {
-            const errorInfo = await parseErrorResponse(response);
-            throw new Error(errorInfo.message || `خطای ${response.status}`);
-        }
-        
-        const result = await response.json();
+        const result = await analyzeHuman(formData);
         
         // Show results with screenshots
         showHumanDecisionResults(result);
@@ -1211,7 +1239,7 @@ async function submitHumanDecisionReview(event) {
     } catch (error) {
         console.error('Human Decision Review error:', error);
         
-        let errorMessage = 'خطا در تحلیل URL. ';
+        let errorMessage = 'خطا در تحلیل. ';
         
         if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
             errorMessage += 'نمی‌توان به سرور متصل شد. لطفاً مطمئن شوید سرور در حال اجرا است.';
@@ -1230,17 +1258,27 @@ function showHumanDecisionResults(result) {
     const modal = document.getElementById('resultsModal');
     const container = document.getElementById('resultsContainer');
     
+    // Unified response format: extract issues and quick_wins
+    const issues = result.issues || [];
+    const quickWins = result.quick_wins || [];
+    const issuesCount = result.issues_count || issues.length;
+    const quickWinsCount = result.quick_wins_count || quickWins.length;
+    const humanReport = result.human_report || result.report || '';
+    const summary = result.summary || {};
+    const pageMap = result.page_map || {};
+    const mode = result.mode || 'url';
+    
     // Persist last analysis info for feedback
     window.lastHumanDecisionAnalysis = {
         analysisId: result.analysis_id || null,
-        pageType: result.page_type || null,
-        topIssues: (result.findings && Array.isArray(result.findings.top_issues)) ? result.findings.top_issues : [],
+        pageType: result.page_type || pageMap.page_type || null,
+        topIssues: issues,
     };
     
-    // Extract screenshots if available (using Base64 data URLs)
+    // Extract screenshots if available (unified format)
     let screenshotsHtml = '';
-    if (result.capture_info && result.capture_info.screenshots) {
-        const screenshots = result.capture_info.screenshots;
+    const screenshots = result.screenshots;
+    if (screenshots) {
         const apiBaseUrl = API_BASE_URL;
         
         screenshotsHtml = '<div style="margin-top: 2rem; padding-top: 1rem; border-top: 2px solid var(--border-color);">';
@@ -1359,6 +1397,64 @@ function showHumanDecisionResults(result) {
         screenshotsHtml += '</div></div>';
     }
     
+    // Build issues and quick wins sections
+    let issuesHtml = '';
+    if (issues.length > 0) {
+        issuesHtml = '<div style="margin-top: 2rem; padding-top: 1rem; border-top: 2px solid var(--border-color);">';
+        issuesHtml += `<h3 style="margin-bottom: 1rem;">Issues (${issuesCount})</h3>`;
+        issuesHtml += '<div style="display: flex; flex-direction: column; gap: 1rem;">';
+        issues.forEach((issue, idx) => {
+            issuesHtml += `
+                <div style="padding: 1rem; background: #fef2f2; border-left: 4px solid #ef4444; border-radius: 4px;">
+                    <h4 style="margin: 0 0 0.5rem 0; font-size: 1rem; color: #dc2626;">
+                        ${issue.title || issue.problem || `Issue ${idx + 1}`}
+                    </h4>
+                    ${issue.problem ? `<p style="margin: 0.5rem 0; color: #7f1d1d;"><strong>Problem:</strong> ${issue.problem}</p>` : ''}
+                    ${issue.why_it_hurts ? `<p style="margin: 0.5rem 0; color: #7f1d1d;"><strong>Why it hurts:</strong> ${issue.why_it_hurts}</p>` : ''}
+                    ${issue.location ? `<p style="margin: 0.5rem 0; color: #7f1d1d; font-size: 0.875rem;"><strong>Location:</strong> ${issue.location}</p>` : ''}
+                    ${issue.fix ? `<p style="margin: 0.5rem 0; color: #065f46;"><strong>Fix:</strong> ${issue.fix}</p>` : ''}
+                    ${issue.severity ? `<p style="margin: 0.5rem 0; color: #7f1d1d; font-size: 0.875rem;"><strong>Severity:</strong> ${issue.severity}</p>` : ''}
+                </div>
+            `;
+        });
+        issuesHtml += '</div></div>';
+    }
+    
+    let quickWinsHtml = '';
+    if (quickWins.length > 0) {
+        quickWinsHtml = '<div style="margin-top: 2rem; padding-top: 1rem; border-top: 2px solid var(--border-color);">';
+        quickWinsHtml += `<h3 style="margin-bottom: 1rem;">Quick Wins (${quickWinsCount})</h3>`;
+        quickWinsHtml += '<div style="display: flex; flex-direction: column; gap: 1rem;">';
+        quickWins.forEach((win, idx) => {
+            quickWinsHtml += `
+                <div style="padding: 1rem; background: #f0fdf4; border-left: 4px solid #10b981; border-radius: 4px;">
+                    <h4 style="margin: 0 0 0.5rem 0; font-size: 1rem; color: #059669;">
+                        ${win.action || `Quick Win ${idx + 1}`}
+                    </h4>
+                    ${win.where ? `<p style="margin: 0.5rem 0; color: #065f46; font-size: 0.875rem;"><strong>Where:</strong> ${win.where.section || win.where.selector || JSON.stringify(win.where)}</p>` : ''}
+                    ${win.reason ? `<p style="margin: 0.5rem 0; color: #065f46;"><strong>Reason:</strong> ${win.reason}</p>` : ''}
+                </div>
+            `;
+        });
+        quickWinsHtml += '</div></div>';
+    }
+    
+    // Build summary section
+    let summaryHtml = '';
+    if (summary && Object.keys(summary).length > 0) {
+        summaryHtml = '<div style="margin-top: 2rem; padding-top: 1rem; border-top: 2px solid var(--border-color);">';
+        summaryHtml += '<h3 style="margin-bottom: 1rem;">Summary</h3>';
+        summaryHtml += '<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem;">';
+        if (summary.url) summaryHtml += `<p><strong>URL:</strong> ${summary.url}</p>`;
+        if (summary.goal) summaryHtml += `<p><strong>Goal:</strong> ${summary.goal}</p>`;
+        if (summary.locale) summaryHtml += `<p><strong>Locale:</strong> ${summary.locale}</p>`;
+        if (summary.headlines_count !== undefined) summaryHtml += `<p><strong>Headlines:</strong> ${summary.headlines_count}</p>`;
+        if (summary.ctas_count !== undefined) summaryHtml += `<p><strong>CTAs:</strong> ${summary.ctas_count}</p>`;
+        if (summary.issues_count !== undefined) summaryHtml += `<p><strong>Issues:</strong> ${summary.issues_count}</p>`;
+        if (summary.quick_wins_count !== undefined) summaryHtml += `<p><strong>Quick Wins:</strong> ${summary.quick_wins_count}</p>`;
+        summaryHtml += '</div></div>';
+    }
+    
     // Build feedback UI (3 buttons + optional wrong issues checklist)
     const topIssues = window.lastHumanDecisionAnalysis.topIssues || [];
     const analysisId = window.lastHumanDecisionAnalysis.analysisId;
@@ -1424,13 +1520,17 @@ function showHumanDecisionResults(result) {
     container.innerHTML = `
         <div class="results-header">
             <h2>Human Decision Review - Results</h2>
+            ${mode ? `<p style="margin-top: 0.5rem; color: #6b7280; font-size: 0.875rem;">Mode: ${mode.toUpperCase()}</p>` : ''}
         </div>
         <div class="results-content">
-            ${result.report ? formatMarkdown(result.report) : '<p>No report available.</p>'}
+            ${humanReport ? formatMarkdown(humanReport) : '<p>No report available.</p>'}
         </div>
+        ${summaryHtml}
+        ${issuesHtml}
+        ${quickWinsHtml}
         ${screenshotsHtml}
         <div style="margin-top: 2rem; padding-top: 1rem; border-top: 2px solid var(--border-color);">
-            <button class="btn btn-primary" onclick="downloadResults('Human Decision Review', \`${escapeHtml(result.report || 'No report available.')}\`)">Copy report</button>
+            <button class="btn btn-primary" onclick="downloadResults('Human Decision Review', \`${escapeHtml(humanReport || 'No report available.')}\`)">Copy report</button>
             <button class="btn btn-secondary" onclick="closeResults()">Close</button>
         </div>
         ${feedbackButtonsHtml}
