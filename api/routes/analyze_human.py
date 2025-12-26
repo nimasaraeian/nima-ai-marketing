@@ -42,6 +42,12 @@ async def analyze_human(
         Response with status, mode, page_map, summary, human_report, issues_count, screenshots
     """
     try:
+        # Validate and normalize goal
+        valid_goals = ["leads", "sales", "booking", "contact", "subscribe", "other"]
+        goal = goal.strip().lower() if goal else "leads"
+        if goal not in valid_goals:
+            goal = "other"  # Default to "other" if invalid
+        
         # 🔴 اجبار کامل به انگلیسی
         locale = "en"
         # Read image bytes if provided

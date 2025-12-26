@@ -83,12 +83,20 @@ export async function POST(req: Request) {
       mode = "url";
     }
 
-    // Parse goal and locale
-    if (goalField && ["leads","sales","booking","contact","subscribe","other"].includes(String(goalField))) {
-      goal = goalField as any;
+    // Parse goal and locale (with strict validation)
+    const goalValue = goalField ? String(goalField).trim() : "";
+    if (goalValue && ["leads","sales","booking","contact","subscribe","other"].includes(goalValue)) {
+      goal = goalValue as any;
+    } else {
+      // Default to "other" if invalid or empty
+      goal = "other";
     }
-    if (localeField && ["fa","en","tr"].includes(String(localeField))) {
-      locale = localeField as any;
+    const localeValue = localeField ? String(localeField).trim() : "";
+    if (localeValue && ["fa","en","tr"].includes(localeValue)) {
+      locale = localeValue as any;
+    } else {
+      // Default to "en" if invalid or empty
+      locale = "en";
     }
 
     // Validation: must have at least one input
@@ -130,12 +138,20 @@ export async function POST(req: Request) {
       mode = "url";
     }
 
-    // Parse goal and locale
-    if (jsonBody.goal && ["leads","sales","booking","contact","subscribe","other"].includes(jsonBody.goal)) {
-      goal = jsonBody.goal;
+    // Parse goal and locale (with strict validation)
+    const goalValueJson = jsonBody.goal ? String(jsonBody.goal).trim() : "";
+    if (goalValueJson && ["leads","sales","booking","contact","subscribe","other"].includes(goalValueJson)) {
+      goal = goalValueJson as any;
+    } else {
+      // Default to "other" if invalid or empty
+      goal = "other";
     }
-    if (jsonBody.locale && ["fa","en","tr"].includes(jsonBody.locale)) {
-      locale = jsonBody.locale;
+    const localeValueJson = jsonBody.locale ? String(jsonBody.locale).trim() : "";
+    if (localeValueJson && ["fa","en","tr"].includes(localeValueJson)) {
+      locale = localeValueJson as any;
+    } else {
+      // Default to "en" if invalid or empty
+      locale = "en";
     }
 
     // Validation
