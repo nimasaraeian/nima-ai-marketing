@@ -77,81 +77,82 @@ async def analyze_image_human(
                 }
             )
         
-        # Generate report from PageMap
+        # Generate report using canonical builder (SAME as URL)
         try:
-            report = await report_from_page_map(page_map)
+            from api.services.decision.report_builder import build_human_report_from_page_map
+            
+            report = await build_human_report_from_page_map(
+                page_map=page_map,
+                goal=goal,
+                locale="en"
+            )
+        except ValueError as ve:
+            # Validation error (fake template detected or empty report)
+            logger.error(f"Report validation failed: {ve}")
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "status": "error",
+                    "stage": "report_builder",
+                    "message": str(ve),
+                    "details": {}
+                }
+            )
         except Exception as e:
             logger.exception(f"Report generation failed: {e}")
             raise HTTPException(
                 status_code=500,
                 detail={
                     "status": "error",
-                    "stage": "decision_engine",
-                    "message": f"Report generation failed: {str(e)}"
+                    "stage": "report_builder",
+                    "message": f"Report generation failed: {str(e)}",
+                    "details": {}
                 }
             )
         
-        # Validate report is not fake/empty
-        human_report = report.get("human_report") or report.get("report") or ""
-        if not human_report or len(human_report.strip()) == 0:
-            logger.error("Generated report is empty")
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "status": "error",
-                    "stage": "report_validation",
-                    "message": "Generated report is empty"
-                }
-            )
+        # Report is already validated by build_human_report_from_page_map
+        # Extract required fields
+        human_report = report.get("human_report", "")
+        summary = report.get("summary", {})
+        if not isinstance(summary, dict):
+            summary = {"message": str(summary) if summary else "Analysis completed."}
         
-        # Check for fake content markers - if status is error, report should not contain these
-        if report.get("status") == "error":
-            fake_markers = ["CTA Recommendations", "Personas", "Decision Friction"]
-            has_fake_markers = any(marker in human_report for marker in fake_markers)
-            if has_fake_markers:
-                logger.error("Error response contains fake report content")
-                raise HTTPException(
-                    status_code=500,
-                    detail={
-                        "status": "error",
-                        "stage": "report_validation",
-                        "message": "Error response should not contain report content"
-                    }
-                )
-        
-        # Check for fake content without corresponding data
-        if "CTA Recommendations" in human_report and "cta_recommendations" not in report:
-            logger.warning("Report contains CTA Recommendations but no cta_recommendations field")
-        if "Personas" in human_report and "mindset_personas" not in report:
-            logger.warning("Report contains Personas but no mindset_personas field")
-        
-        # Ensure report field is not null if human_report exists
-        if report.get("report") is None and not human_report:
-            logger.error("Report field is null and human_report is empty")
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "status": "error",
-                    "stage": "report_validation",
-                    "message": "Report field is null"
-                }
-            )
-        
-        # Extract summary and issues
-        summary = report.get("summary") or report.get("what_to_fix_first") or "Analysis completed."
+        # Extract issues and quick_wins from report
         findings = report.get("findings", {})
-        top_issues = findings.get("top_issues", []) if isinstance(findings, dict) else []
-        issues_count = len(top_issues) if isinstance(top_issues, list) else 0
+        if not isinstance(findings, dict):
+            findings = {}
         
-        # Build response
+        issues = report.get("issues", [])
+        if not issues:
+            issues = findings.get("top_issues", []) if isinstance(findings, dict) else []
+        if not isinstance(issues, list):
+            issues = []
+        
+        quick_wins = report.get("quick_wins", [])
+        if not quick_wins:
+            quick_wins = findings.get("quick_wins", []) if isinstance(findings, dict) else []
+        if not isinstance(quick_wins, list):
+            quick_wins = []
+        
+        # Calculate counts
+        issues_count = len(issues)
+        quick_wins_count = len(quick_wins)
+        
+        # Sync summary with counts
+        summary["issues_count"] = issues_count
+        summary["quick_wins_count"] = quick_wins_count
+        
+        # Build response (ONLY include required fields, NO template fields)
         response = {
             "status": "ok",
             "mode": "image",
             "goal": goal,
             "human_report": human_report,
             "summary": summary,
+            "issues": issues,
+            "quick_wins": quick_wins,
             "issues_count": issues_count,
-            "findings": findings,
+            "quick_wins_count": quick_wins_count,
             "debug": report.get("debug", {})
         }
         

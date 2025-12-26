@@ -8,6 +8,7 @@ from typing import Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from api.services.intake.unified_intake import build_page_map
 from api.services.decision.report_from_map import report_from_page_map
+from api.utils.english_only import enforce_english_only
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,7 @@ router = APIRouter()
 @router.post("/api/analyze/human")
 async def analyze_human(
     goal: str = Form(default="leads"),
+    locale: str = Form(default="en"),
     url: Optional[str] = Form(default=None),
     text: Optional[str] = Form(default=None),
     image: Optional[UploadFile] = File(default=None)
@@ -31,6 +33,7 @@ async def analyze_human(
     
     Args:
         goal: Analysis goal (leads, sales, booking, etc.)
+        locale: Locale (always forced to "en")
         url: Optional URL string
         text: Optional text content
         image: Optional image file
@@ -39,6 +42,8 @@ async def analyze_human(
         Response with status, mode, page_map, summary, human_report, issues_count, screenshots
     """
     try:
+        # 🔴 اجبار کامل به انگلیسی
+        locale = "en"
         # Read image bytes if provided
         image_bytes = None
         if image:
@@ -73,6 +78,8 @@ async def analyze_human(
                 text=text.strip() if text else None,
                 goal=goal
             )
+            # 🔴 Force language to English
+            page_map.language = "en"
         except HTTPException:
             raise  # Re-raise HTTP exceptions
         except Exception as e:
@@ -100,18 +107,43 @@ async def analyze_human(
                 }
             )
         
-        # Extract summary and issues
-        summary = report.get("summary") or report.get("what_to_fix_first") or "Analysis completed."
+        # Extract summary, issues, and quick_wins
+        summary = report.get("summary", {})
+        if not isinstance(summary, dict):
+            summary = {"message": str(summary) if summary else "Analysis completed."}
+        
         findings = report.get("findings", {})
-        top_issues = findings.get("top_issues", []) if isinstance(findings, dict) else []
-        issues_count = len(top_issues) if isinstance(top_issues, list) else 0
+        if not isinstance(findings, dict):
+            findings = {}
+        
+        # Extract issues and quick_wins from report (they should already be at root level from report_from_page_map)
+        # But also check findings as fallback
+        issues = report.get("issues", [])
+        if not issues:
+            issues = findings.get("top_issues", []) if isinstance(findings, dict) else []
+        if not isinstance(issues, list):
+            issues = []
+        
+        quick_wins = report.get("quick_wins", [])
+        if not quick_wins:
+            quick_wins = findings.get("quick_wins", []) if isinstance(findings, dict) else []
+        if not isinstance(quick_wins, list):
+            quick_wins = []
+        
+        # Calculate counts
+        issues_count = len(issues)
+        quick_wins_count = len(quick_wins)
+        
+        # Sync summary with counts
+        summary["issues_count"] = issues_count
+        summary["quick_wins_count"] = quick_wins_count
         
         # Extract screenshots (only for URL mode)
         screenshots = None
         if mode == "url" and "screenshots" in report:
             screenshots = report.get("screenshots")
         
-        # Build response
+        # Build response with all required fields
         response = {
             "status": "ok",
             "mode": mode,
@@ -119,10 +151,37 @@ async def analyze_human(
             "page_map": page_map.dict(),  # Include for debugging
             "summary": summary,
             "human_report": report.get("human_report") or report.get("report") or "",
+            "issues": issues,
+            "quick_wins": quick_wins,
             "issues_count": issues_count,
+            "quick_wins_count": quick_wins_count,
             "screenshots": screenshots,
             "debug": report.get("debug", {})
         }
+        
+        # --- انتقال issues و quick_wins از debug به خروجی اصلی ---
+        debug = response.get("debug") or {}
+        after_heuristics = debug.get("after_heuristics") or {}
+        
+        issues = after_heuristics.get("issues", []) or []
+        quick_wins = after_heuristics.get("quick_wins", []) or []
+        
+        # اضافه شدن به خروجی اصلی
+        response["issues"] = issues
+        response["quick_wins"] = quick_wins
+        
+        # شمارنده‌ها
+        response["issues_count"] = len(issues)
+        response["quick_wins_count"] = len(quick_wins)
+        
+        # هماهنگ‌سازی summary
+        summary = response.get("summary") or {}
+        summary["issues_count"] = response["issues_count"]
+        summary["quick_wins_count"] = response["quick_wins_count"]
+        response["summary"] = summary
+        
+        # 🔴 جلوگیری کامل از خروج متن فارسی (حتی اگر اشتباهی تولید شد)
+        response = enforce_english_only(response)
         
         return response
         

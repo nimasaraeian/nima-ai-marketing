@@ -53,6 +53,10 @@ async def build_human_decision_review(
         debug_info["steps"].append("core_analysis")
         raw = await _run_core_analysis(url, goal, locale)
         
+        # Add debug snapshot from heuristics step
+        if "_debug_after_heuristics" in raw:
+            debug_info["after_heuristics"] = raw.pop("_debug_after_heuristics")
+        
         # Step 2: Context Detection
         debug_info["steps"].append("context")
         ctx = await _build_context_from_raw(raw, url)
@@ -101,6 +105,19 @@ async def _run_core_analysis(url: str, goal: str, locale: str) -> Dict[str, Any]
         locale=locale,
         url=url
     )
+    
+    # DEBUG SNAPSHOT: After heuristics, capture issues and quick_wins
+    # Note: This will be added to debug_info in build_human_decision_review
+    findings_dict_raw = findings.get("findings", {})
+    issues_raw = findings_dict_raw.get("top_issues", [])
+    quick_wins_raw = findings_dict_raw.get("quick_wins", [])
+    # Store in raw dict for later debug snapshot
+    raw["_debug_after_heuristics"] = {
+        "issues": issues_raw[:10] if issues_raw else [],
+        "issues_len": len(issues_raw) if issues_raw else 0,
+        "quick_wins": quick_wins_raw[:10] if quick_wins_raw else [],
+        "quick_wins_len": len(quick_wins_raw) if quick_wins_raw else 0
+    }
     
     # Apply guardrails
     findings_filtered = findings.copy()
@@ -177,24 +194,27 @@ async def _build_context_from_raw(raw: Dict[str, Any], url: str) -> Dict[str, An
 
 def _build_signature_layers(raw: Dict[str, Any]) -> Dict[str, Any]:
     """Build signature layers (insight, CTAs, cost, personas) from raw analysis."""
-    try:
-        from api.brain.decision_engine.enhancers import build_signature_layers
-        
-        # Convert raw to format expected by enhancers
-        findings = raw.get("findings", {})
-        report_dict = {
-            "findings": findings.get("findings", {}),
-            "human_report": "",  # Will be built from signature layers
-            "page_type": findings.get("page_context", {}).get("page_type", "unknown"),
-            "summary": {"goal": raw.get("goal", "other")}
-        }
-        
-        layers = build_signature_layers(report_dict)
-        return layers
-    except Exception as e:
-        logger.warning(f"Failed to build signature layers: {e}")
-        # Return defaults
-        return _get_default_signature_layers()
+    from api.brain.decision_engine.enhancers import build_signature_layers
+    
+    # Convert raw to format expected by enhancers
+    findings = raw.get("findings", {})
+    report_dict = {
+        "findings": findings.get("findings", {}),
+        "human_report": "",  # Will be built from signature layers
+        "page_type": findings.get("page_context", {}).get("page_type", "unknown"),
+        "summary": {"goal": raw.get("goal", "other")}
+    }
+    
+    # DO NOT use default fallbacks - if signature layers fail, raise error
+    layers = build_signature_layers(report_dict)
+    
+    # Validate all required layers exist
+    required_layers = ["decision_psychology_insight", "cta_recommendations", "cost_of_inaction", "mindset_personas"]
+    for layer_key in required_layers:
+        if not layers.get(layer_key):
+            raise ValueError(f"Signature layer '{layer_key}' is missing. Report generation failed.")
+    
+    return layers
 
 
 def _build_human_report_from_signature_layers(sections: Dict[str, Any], findings: Dict[str, Any]) -> str:
@@ -364,6 +384,16 @@ async def _assemble_base_report(raw: Dict[str, Any], sections: Dict[str, Any], c
             "quick_wins_count": len(findings.get("findings", {}).get("quick_wins", [])),
         }
     
+    # Validate signature layers before building report (DO NOT use default templates)
+    if not sections.get("decision_psychology_insight"):
+        raise ValueError("decision_psychology_insight is missing from signature layers")
+    if not sections.get("cta_recommendations"):
+        raise ValueError("cta_recommendations is missing from signature layers")
+    if not sections.get("cost_of_inaction"):
+        raise ValueError("cost_of_inaction is missing from signature layers")
+    if not sections.get("mindset_personas"):
+        raise ValueError("mindset_personas is missing from signature layers")
+    
     # Assemble base report
     report = {
         "analysisStatus": "ok",
@@ -392,11 +422,11 @@ async def _assemble_base_report(raw: Dict[str, Any], sections: Dict[str, Any], c
         "brand_context": ctx.get("brand_context", {}),
         "page_intent": ctx.get("page_intent", {}),
         "page_type": ctx.get("page_type", {}),  # New structured field
-        # Signature layers (will be populated later)
-        "decision_psychology_insight": sections.get("decision_psychology_insight", _get_default_signature_layers()["decision_psychology_insight"]),
-        "cta_recommendations": sections.get("cta_recommendations", _get_default_signature_layers()["cta_recommendations"]),
-        "cost_of_inaction": sections.get("cost_of_inaction", _get_default_signature_layers()["cost_of_inaction"]),
-        "mindset_personas": sections.get("mindset_personas", _get_default_signature_layers()["mindset_personas"])
+        # Signature layers (validated above)
+        "decision_psychology_insight": sections.get("decision_psychology_insight"),
+        "cta_recommendations": sections.get("cta_recommendations"),
+        "cost_of_inaction": sections.get("cost_of_inaction"),
+        "mindset_personas": sections.get("mindset_personas")
     }
     
     return report
@@ -517,19 +547,11 @@ def _finalize_and_validate(report: Dict[str, Any], ctx: Dict[str, Any], debug_in
         "mindset_personas"
     ]
     
+    # DO NOT add default templates - if required keys are missing, raise error
     for key in required_keys:
         if key not in report:
-            logger.warning(f"Missing required key: {key}, adding default")
-            if key == "decision_psychology_insight":
-                report[key] = _get_default_signature_layers()["decision_psychology_insight"]
-            elif key == "cta_recommendations":
-                report[key] = _get_default_signature_layers()["cta_recommendations"]
-            elif key == "cost_of_inaction":
-                report[key] = _get_default_signature_layers()["cost_of_inaction"]
-            elif key == "mindset_personas":
-                report[key] = _get_default_signature_layers()["mindset_personas"]
-            else:
-                report[key] = ctx.get(key, {})
+            logger.error(f"Missing required key: {key} in final report")
+            raise ValueError(f"Required key '{key}' is missing from report. Report generation failed.")
     
     # Validate human_report does NOT contain legacy phrases
     human_report = report.get("human_report", "")
@@ -602,6 +624,38 @@ def _finalize_and_validate(report: Dict[str, Any], ctx: Dict[str, Any], debug_in
             if "untrustworthy" in found_forbidden:
                 report["human_report"] = sanitize_text(report.get("human_report", ""))
     
+    # Ensure response ALWAYS includes issues and quick_wins
+    findings_final = report.get("findings", {})
+    if not isinstance(findings_final, dict):
+        findings_final = {}
+    
+    issues = findings_final.get("top_issues", [])
+    quick_wins = findings_final.get("quick_wins", [])
+    
+    # Always include issues and quick_wins at top level
+    report["issues"] = issues if isinstance(issues, list) else []
+    report["quick_wins"] = quick_wins if isinstance(quick_wins, list) else []
+    report["issues_count"] = len(report["issues"])
+    
+    # Ensure summary always has these counts
+    if "summary" not in report:
+        report["summary"] = {}
+    if not isinstance(report["summary"], dict):
+        report["summary"] = {}
+    
+    report["summary"]["issues_count"] = report["issues_count"]
+    report["summary"]["quick_wins_count"] = len(report["quick_wins"])
+    
+    # DEBUG SNAPSHOT: After finalize, capture final state
+    debug_info["after_finalize_keys"] = list(report.keys())
+    debug_info["after_finalize_counts"] = {
+        "issues_count": report.get("issues_count"),
+        "summary_issues_count": report.get("summary", {}).get("issues_count"),
+        "summary_quick_wins_count": report.get("summary", {}).get("quick_wins_count"),
+        "has_issues_key": "issues" in report,
+        "has_quick_wins_key": "quick_wins" in report
+    }
+    
     # Add debug info
     report["debug"] = {
         "pipeline_version": "human_report_v2.1",
@@ -613,7 +667,10 @@ def _finalize_and_validate(report: Dict[str, Any], ctx: Dict[str, Any], debug_in
         "page_type": ctx.get("page_type", {}).get("type", "unknown"),
         "persona_template_used": debug_info.get("persona_template_used", "unknown"),
         "cost_template_used": debug_info.get("cost_template_used", "unknown"),
-        "errors": debug_info["errors"]
+        "errors": debug_info["errors"],
+        # Include debug snapshots
+        "after_finalize_keys": debug_info.get("after_finalize_keys", []),
+        "after_finalize_counts": debug_info.get("after_finalize_counts", {})
     }
     
     # Remove legacy fields if present

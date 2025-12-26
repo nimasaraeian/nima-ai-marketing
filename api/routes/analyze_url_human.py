@@ -229,47 +229,68 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         print(f"\n[analyze_url_human] Starting analysis for URL: {payload.url}")
         print(f"[analyze_url_human] Goal: {payload.goal}, Locale: {payload.locale}")
         
-        # DEPRECATION: Call unified intake pipeline internally
-        try:
-            from api.services.intake.unified_intake import build_page_map
-            from api.services.decision.report_from_map import report_from_page_map
-            
-            # Build PageMap from URL
-            page_map = await build_page_map(
-                url=payload.url,
-                image_bytes=None,
-                text=None,
-                goal=payload.goal or "other"
-            )
-            
-            # Generate report from PageMap
-            unified_report = await report_from_page_map(page_map)
-            
-            # Convert to legacy format
-            response_data = {
-                "human_report": unified_report.get("human_report", ""),
-                "summary": unified_report.get("summary", ""),
-                "findings": unified_report.get("findings", {}),
-                "debug": unified_report.get("debug", {}),
-                "page_type": unified_report.get("page_type", {}),
-                "screenshots": unified_report.get("screenshots", {})
-            }
-            
-            print("[analyze_url_human] ✅ Analysis completed via unified endpoint")
-            # Continue to memory logging below
-        except Exception as unified_error:
-            logger.warning(f"Unified endpoint failed, falling back to legacy: {unified_error}")
-            # Fall through to legacy implementation
+        # Use canonical report builder (SAME as image/text)
+        from api.services.intake.unified_intake import build_page_map
+        from api.services.decision.report_builder import build_human_report_from_page_map
         
-        # LEGACY FALLBACK: Use original builder
-        from api.brain.decision_engine.human_report_builder import build_human_decision_review
+        # Build PageMap from URL
+        page_map = await build_page_map(
+            url=payload.url,
+            image_bytes=None,
+            text=None,
+            goal=payload.goal or "other"
+        )
         
-        print("[analyze_url_human] Building human decision review (legacy fallback)...")
-        response_data = await build_human_decision_review(
-            url=str(payload.url),
+        # Generate report using canonical builder
+        report = await build_human_report_from_page_map(
+            page_map=page_map,
             goal=payload.goal or "other",
             locale=payload.locale or "en"
         )
+        
+        # Extract issues and quick_wins from report
+        findings = report.get("findings", {})
+        if not isinstance(findings, dict):
+            findings = {}
+        
+        issues = report.get("issues", [])
+        if not issues:
+            issues = findings.get("top_issues", []) if isinstance(findings, dict) else []
+        if not isinstance(issues, list):
+            issues = []
+        
+        quick_wins = report.get("quick_wins", [])
+        if not quick_wins:
+            quick_wins = findings.get("quick_wins", []) if isinstance(findings, dict) else []
+        if not isinstance(quick_wins, list):
+            quick_wins = []
+        
+        # Calculate counts
+        issues_count = len(issues)
+        quick_wins_count = len(quick_wins)
+        
+        # Sync summary with counts
+        summary = report.get("summary", {})
+        if not isinstance(summary, dict):
+            summary = {}
+        summary["issues_count"] = issues_count
+        summary["quick_wins_count"] = quick_wins_count
+        
+        # Convert to legacy format for backward compatibility
+        response_data = {
+            "human_report": report.get("human_report", ""),
+            "summary": summary,
+            "findings": findings,
+            "issues": issues,
+            "quick_wins": quick_wins,
+            "issues_count": issues_count,
+            "quick_wins_count": quick_wins_count,
+            "debug": report.get("debug", {}),
+            "page_type": report.get("page_type"),
+            "screenshots": report.get("screenshots", {})
+        }
+        
+        print("[analyze_url_human] ✅ Analysis completed via canonical builder")
         
         print("[analyze_url_human] ✅ Analysis completed successfully")
         
