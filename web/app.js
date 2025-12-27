@@ -1276,8 +1276,33 @@ function showHumanDecisionResults(result) {
     };
     
     // Extract screenshots if available (unified format)
+    // Check both result.screenshots (legacy) and result.capture.artifacts (new format)
     let screenshotsHtml = '';
-    const screenshots = result.screenshots;
+    let screenshots = result.screenshots;
+    
+    // If screenshots not in root, check capture.artifacts (new format)
+    if (!screenshots && result.capture && result.capture.artifacts) {
+        const artifacts = result.capture.artifacts.above_the_fold;
+        if (artifacts) {
+            // Convert artifacts to screenshots format for compatibility
+            screenshots = {
+                desktop: {
+                    above_the_fold_data_url: artifacts.desktop?.data_uri || null,
+                    url: artifacts.desktop?.url || null
+                },
+                mobile: {
+                    above_the_fold_data_url: artifacts.mobile?.data_uri || null,
+                    url: artifacts.mobile?.url || null
+                }
+            };
+        }
+    }
+    
+    // Also check capture.screenshots (legacy format in capture)
+    if (!screenshots && result.capture && result.capture.screenshots) {
+        screenshots = result.capture.screenshots;
+    }
+    
     if (screenshots) {
         const apiBaseUrl = API_BASE_URL;
         
@@ -1289,8 +1314,9 @@ function showHumanDecisionResults(result) {
         if (screenshots.desktop) {
             const desktop = screenshots.desktop;
             
-            // Desktop Above the Fold
+            // Desktop Above the Fold - check multiple possible fields
             const desktopAtfUrl = desktop.above_the_fold_data_url || 
+                desktop.url ||  // New artifacts format
                 (desktop.above_the_fold ? `${apiBaseUrl}/api/artifacts/${desktop.above_the_fold.split(/[/\\]/).pop()}` : null);
             
             if (desktopAtfUrl) {
@@ -1328,8 +1354,9 @@ function showHumanDecisionResults(result) {
         if (screenshots.mobile) {
             const mobile = screenshots.mobile;
             
-            // Mobile Above the Fold
+            // Mobile Above the Fold - check multiple possible fields
             const mobileAtfUrl = mobile.above_the_fold_data_url || 
+                mobile.url ||  // New artifacts format
                 (mobile.above_the_fold ? `${apiBaseUrl}/api/artifacts/${mobile.above_the_fold.split(/[/\\]/).pop()}` : null);
             
             if (mobileAtfUrl) {

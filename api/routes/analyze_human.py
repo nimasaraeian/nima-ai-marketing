@@ -295,6 +295,24 @@ async def analyze_human(request: Request) -> Dict[str, Any]:
             "debug": report.get("debug", {})
         }
         
+        # For URL mode, ensure capture and screenshots are attached
+        if mode == "url" and url:
+            try:
+                from api.utils.output_sanitize import ensure_capture_attached
+                response = await ensure_capture_attached(
+                    url=url,
+                    goal=goal,
+                    locale=locale,
+                    result=response,
+                    request=request
+                )
+                # Update screenshots from capture if available
+                if response.get("screenshots"):
+                    screenshots = response["screenshots"]
+            except Exception as e:
+                logger.warning(f"Failed to ensure capture attached for URL mode: {e}")
+                # Continue with existing screenshots
+        
         # Note: issues and quick_wins are already extracted from report above
         # We don't need to override them from debug.after_heuristics as they may contain Persian
         # The report_from_page_map already provides sanitized issues and quick_wins
