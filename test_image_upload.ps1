@@ -1,72 +1,48 @@
-# PowerShell script to test image upload endpoint
+# PowerShell script to test /api/analyze/image-human endpoint
+# This endpoint requires multipart/form-data with file upload
 
-$apiUrl = "http://127.0.0.1:8000/api/brain/test"
+$BASE = "http://127.0.0.1:8000"
 
-# Create a simple test image file (or use an existing one)
-$testImagePath = "test_image.jpg"
+# Option 1: If you have the image file path
+$imagePath = "path\to\your\image.png"  # Replace with actual image path
 
-# Check if test image exists, if not, create a dummy one
-if (-not (Test-Path $testImagePath)) {
-    Write-Host "Creating dummy test image..."
-    # Create a minimal valid JPEG (1x1 pixel)
-    $bytes = [byte[]](0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01, 0x01, 0x01, 0x00, 0x48, 0x00, 0x48, 0x00, 0x00, 0xFF, 0xDB, 0x00, 0x43, 0x00, 0x08, 0x06, 0x06, 0x07, 0x06, 0x05, 0x08, 0x07, 0x07, 0x07, 0x09, 0x09, 0x08, 0x0A, 0x0C, 0x14, 0x0D, 0x0C, 0x0B, 0x0B, 0x0C, 0x19, 0x12, 0x13, 0x0F, 0x14, 0x1D, 0x1A, 0x1F, 0x1E, 0x1D, 0x1A, 0x1C, 0x1C, 0x20, 0x24, 0x2E, 0x27, 0x20, 0x22, 0x2C, 0x23, 0x1C, 0x1C, 0x28, 0x37, 0x29, 0x2C, 0x30, 0x31, 0x34, 0x34, 0x34, 0x1F, 0x27, 0x39, 0x3D, 0x38, 0x32, 0x3C, 0x2E, 0x33, 0x34, 0x32, 0xFF, 0xC0, 0x00, 0x0B, 0x08, 0x00, 0x01, 0x00, 0x01, 0x01, 0x01, 0x11, 0x00, 0xFF, 0xC4, 0x00, 0x14, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x08, 0xFF, 0xC4, 0x00, 0x14, 0x10, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xFF, 0xDA, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3F, 0x00, 0x00, 0xFF, 0xD9)
-    [System.IO.File]::WriteAllBytes($testImagePath, $bytes)
-    Write-Host "Test image created: $testImagePath"
+# Option 2: If image is in artifacts directory, use one of the existing files
+# $imagePath = "api\artifacts\atf_desktop_1766482842.png"
+
+# Check if file exists
+if (-not (Test-Path $imagePath)) {
+    Write-Host "Error: Image file not found at: $imagePath" -ForegroundColor Red
+    Write-Host "Please update `$imagePath with the correct path to your image file." -ForegroundColor Yellow
+    exit 1
 }
 
-Write-Host "Testing image upload to: $apiUrl"
-Write-Host "Image file: $testImagePath"
+Write-Host "Uploading image: $imagePath" -ForegroundColor Cyan
+Write-Host "Endpoint: $BASE/api/analyze/image-human" -ForegroundColor Cyan
+Write-Host "Goal: leads" -ForegroundColor Cyan
 Write-Host ""
 
-# Create multipart form data
-$boundary = [System.Guid]::NewGuid().ToString()
-$LF = "`r`n"
-
-$bodyLines = @(
-    "--$boundary",
-    "Content-Disposition: form-data; name=`"content`"",
-    "",
-    "Test content",
-    "--$boundary",
-    "Content-Disposition: form-data; name=`"image`"; filename=`"test_image.jpg`"",
-    "Content-Type: image/jpeg",
-    ""
-)
-
-$bodyText = $bodyLines -join $LF
-$bodyBytes = [System.Text.Encoding]::UTF8.GetBytes($bodyText)
-$bodyBytes += [System.Text.Encoding]::UTF8.GetBytes($LF)
-
-# Read image file
-$imageBytes = [System.IO.File]::ReadAllBytes($testImagePath)
-$bodyBytes += $imageBytes
-
-$bodyBytes += [System.Text.Encoding]::UTF8.GetBytes($LF)
-$bodyBytes += [System.Text.Encoding]::UTF8.GetBytes("--$boundary--")
-
 try {
-    $response = Invoke-RestMethod -Uri $apiUrl -Method Post -ContentType "multipart/form-data; boundary=$boundary" -Body $bodyBytes
+    # Create multipart form data
+    $form = @{
+        image = Get-Item -Path $imagePath
+        goal = "leads"
+    }
     
-    Write-Host "✅ SUCCESS!" -ForegroundColor Green
+    # Send request
+    $response = Invoke-RestMethod -Uri "$BASE/api/analyze/image-human" `
+        -Method POST `
+        -Form $form `
+        -ContentType "multipart/form-data"
+    
+    Write-Host "✅ Success!" -ForegroundColor Green
     Write-Host ""
     Write-Host "Response:" -ForegroundColor Cyan
     $response | ConvertTo-Json -Depth 10
+    
 } catch {
-    Write-Host "❌ ERROR:" -ForegroundColor Red
-    Write-Host $_.Exception.Message
+    Write-Host "❌ Error occurred:" -ForegroundColor Red
+    Write-Host $_.Exception.Message -ForegroundColor Red
     if ($_.ErrorDetails.Message) {
-        Write-Host $_.ErrorDetails.Message
+        Write-Host "Details: $($_.ErrorDetails.Message)" -ForegroundColor Yellow
     }
 }
-
-
-
-
-
-
-
-
-
-
-
-

@@ -39,6 +39,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ValidationError
+from api.core.errors import http_exception_handler, unhandled_exception_handler
 import os
 import sys
 import base64
@@ -219,6 +220,11 @@ def load_psychology_finetune_model_id() -> str:
 
 # Initialize FastAPI app
 app = FastAPI(title="Nima AI Brain API", version="1.0.0")
+
+# Register standardized error handlers
+# These must be registered BEFORE other exception handlers to take precedence
+app.add_exception_handler(HTTPException, http_exception_handler)
+app.add_exception_handler(Exception, unhandled_exception_handler)
 
 # Canonical uvicorn command (for documentation):
 # uvicorn api.main:app --host 0.0.0.0 --port $PORT
@@ -442,129 +448,62 @@ else:
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """
-    Handle FastAPI validation errors (422) with user-friendly messages.
+    Handle FastAPI validation errors (422) with standardized error format.
+    
+    Returns standard error contract:
+    {
+        "status": "error",
+        "message": "<readable string>",
+        "stage": "validation",
+        "hint": "<optional>"
+    }
     """
     import logging
+    from api.core.errors import error_payload
+    
     logger = logging.getLogger("brain")
     
     errors = exc.errors()
-    error_details = []
     
-    for error in errors:
-        field = " -> ".join(str(loc) for loc in error.get("loc", []))
-        message = error.get("msg", "Validation error")
-        error_type = error.get("type", "unknown")
-        
-        # Translate common error types to user-friendly messages
-        user_friendly_msg = message
-        if error_type == "missing":
-            user_friendly_msg = f"Required field '{field}' is missing"
-        elif error_type == "value_error.missing":
-            user_friendly_msg = f"Required field '{field}' is missing"
-        elif error_type == "type_error":
-            user_friendly_msg = f"Invalid data type for field '{field}'. Expected: {message}"
-        elif "required" in message.lower():
-            user_friendly_msg = f"Required field '{field}' is missing"
-        
-        error_details.append({
-            "field": field,
-            "message": user_friendly_msg,
-            "type": error_type,
-            "original_message": message
-        })
-        
-        logger.warning(f"Validation error: {field} - {message} (type: {error_type})")
-        print(f"❌ Validation error: {field} - {user_friendly_msg}")
+    # Extract first error for message
+    first = errors[0] if errors else {}
+    msg = first.get("msg", "Validation error")
+    loc = first.get("loc", [])
     
-    # Create user-friendly error message
-    if len(error_details) == 1:
-        error_detail = error_details[0]
-        user_message = error_detail['message']
+    # Format location as dot-separated path (e.g., "body.url" or "query.page")
+    if loc:
+        # Convert location tuple to readable path
+        # FastAPI locations: ('body', 'url') -> 'body.url'
+        # or ('query', 'page') -> 'query.page'
+        loc_str = ".".join(map(str, loc))
+        message = f"Validation error at {loc_str}: {msg}"
     else:
-        fields_list = ", ".join([e['field'] for e in error_details if e['field']])
-        user_message = f"Validation errors in {len(error_details)} field(s): {fields_list}. Please check your request data."
+        message = msg
     
-    print(f"\n❌ VALIDATION ERROR (422): {user_message}")
-    print(f"Request path: {request.url.path}")
-    print(f"Request method: {request.method}")
-    print(f"Error details: {error_details}")
+    # Log all validation errors for debugging
+    logger.warning(f"Validation error: {message} (path: {request.url.path})")
+    if len(errors) > 1:
+        logger.debug(f"Additional validation errors: {len(errors) - 1} more")
+        for i, error in enumerate(errors[1:], 1):
+            error_loc = ".".join(map(str, error.get("loc", [])))
+            error_msg = error.get("msg", "Validation error")
+            logger.debug(f"  Error {i}: {error_loc} - {error_msg}")
+    
+    # Provide helpful hint for common validation errors
+    hint = None
+    error_type = first.get("type", "")
+    if "missing" in error_type or "required" in msg.lower():
+        hint = "Please provide all required fields"
+    elif "type_error" in error_type or "value_error" in error_type:
+        hint = "Please check the data types and formats of your input"
     
     return JSONResponse(
         status_code=422,
-        content={
-            "detail": error_details,
-            "message": user_message,
-            "error_type": "validation_error",
-            "path": request.url.path
-        }
+        content=error_payload(message=message, stage="validation", hint=hint)
     )
 
-# Global exception handler to catch any unhandled exceptions
-@app.exception_handler(Exception)
-async def global_exception_handler(request: Request, exc: Exception):
-    """
-    Global exception handler to prevent 500 errors from leaking to clients.
-    Returns a proper JSON response instead of letting FastAPI raise HTTPException.
-    """
-    import logging
-    logger = logging.getLogger("brain")
-    
-    error_type = type(exc).__name__
-    error_message = str(exc)
-    
-    logger.error(f"Global exception handler caught: {error_type}: {exc}", exc_info=True)
-    print(f"\n❌ GLOBAL EXCEPTION HANDLER: {error_type}: {exc}")
-    import traceback
-    traceback.print_exc()
-    
-    # For HTTPExceptions, re-raise them (they're intentional)
-    if isinstance(exc, HTTPException):
-        raise exc
-    
-    # For other exceptions, return a BrainResponse to maintain API contract
-    user_friendly_message = "An unexpected error occurred. Please try again later."
-    
-    if "does not contain enough decision-critical" in error_message.lower() or "not contain enough decision-critical" in error_message.lower() or ("image" in error_message.lower() and "decision" in error_message.lower() and "information" in error_message.lower()):
-        user_friendly_message = (
-            "The image does not contain enough decision-critical information for analysis.\n\n"
-            "SOLUTION: Please upload an image that includes:\n"
-            "- Pricing information (visible prices, plans, or cost)\n"
-            "- Call-to-action buttons or links (Buy, Sign Up, Get Started, etc.)\n"
-            "- Guarantees, refund policies, or risk-reduction elements\n"
-            "- Headlines or key messaging\n"
-            "- Product/service information\n\n"
-            "Alternatively, you can:\n"
-            "- Paste the text content directly instead of using an image\n"
-            "- Provide both image and text together for better analysis\n"
-            "- Use a screenshot that captures the full landing page with all decision elements"
-        )
-    elif "403" in error_message or "forbidden" in error_message.lower() or "blocks automated access" in error_message.lower():
-        # Preserve the helpful error message about 403 errors
-        user_friendly_message = error_message if "SOLUTION:" in error_message else (
-            "This website blocks automated access (403 Forbidden). "
-            "Please manually copy the page content (headline, CTA, price, guarantee) "
-            "and paste it in the input field instead of the URL."
-        )
-    elif "OPENAI_API_KEY" in error_message:
-        user_friendly_message = "OpenAI API key is not configured. Please contact support."
-    elif "timeout" in error_message.lower() or "timed out" in error_message.lower():
-        user_friendly_message = error_message if "SOLUTION:" in error_message else "Request timed out. Please try again."
-    elif "connection" in error_message.lower():
-        user_friendly_message = "Connection error. Please check your internet connection."
-    
-    from fastapi.responses import JSONResponse
-    # Return 500 with proper error response
-    # This maintains the API contract by returning BrainResponse format
-    return JSONResponse(
-        status_code=500,
-        content={
-            "response": f"Error: {user_friendly_message}",
-            "model": "gpt-4o-mini",
-            "quality_score": 0,
-            "quality_checks": {"error": True, "error_type": error_type},
-            "error_detail": error_message[:200] if len(error_message) > 200 else error_message  # Truncate long messages
-        }
-    )
+# NOTE: Global exception handler moved to api.core.errors.unhandled_exception_handler
+# Registered above after app creation to ensure standardized error format
 
 # Register routers
 
