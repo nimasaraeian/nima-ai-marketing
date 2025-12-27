@@ -44,15 +44,17 @@ def get_env(name: str, default: str | None = None) -> str | None:
 
 def get_public_base_url() -> str | None:
     """
-    Get PUBLIC_BASE_URL environment variable.
+    Get BASE_PUBLIC_URL or PUBLIC_BASE_URL environment variable.
     
     This should be set in production to the public-facing URL of the API
     (e.g., https://nima-ai-marketing-production.up.railway.app).
     
+    Checks BASE_PUBLIC_URL first, then PUBLIC_BASE_URL for backward compatibility.
+    
     Returns:
         Public base URL or None if not set
     """
-    return get_env("PUBLIC_BASE_URL")
+    return get_env("BASE_PUBLIC_URL") or get_env("PUBLIC_BASE_URL")
 
 
 def is_local_dev() -> bool:
@@ -126,15 +128,12 @@ def get_artifacts_dir() -> Path:
     """
     Get the directory path for artifacts (screenshots from page capture).
     
-    Uses ARTIFACTS_DIR env var if set, otherwise defaults to api/artifacts.
+    Uses ARTIFACTS_DIR env var if set, otherwise defaults to /tmp/artifacts (Railway-friendly).
     Always resolves to absolute path and ensures directory exists.
     
     Returns:
         Path object pointing to artifacts directory
     """
-    # Get API directory (where this config module is located: api/core/config.py)
-    api_dir = Path(__file__).resolve().parent.parent  # api/
-    
     # Check for custom path from env
     custom_path = get_env("ARTIFACTS_DIR")
     if custom_path:
@@ -142,12 +141,23 @@ def get_artifacts_dir() -> Path:
         if Path(custom_path).is_absolute():
             artifacts_dir = Path(custom_path).resolve()
         else:
-            # Relative path: resolve from project root
-            project_root = api_dir.parent
-            artifacts_dir = (project_root / custom_path).resolve()
+            # Relative path: resolve from current working directory
+            artifacts_dir = Path(custom_path).resolve()
     else:
-        # Default: api/artifacts
-        artifacts_dir = (api_dir / "artifacts").resolve()
+        # Default: /tmp/artifacts (Railway-friendly, works on Linux/Mac)
+        # On Windows, use a temp directory
+        import platform
+        if platform.system() == "Windows":
+            import tempfile
+            # Use Windows temp directory
+            temp_base = Path(tempfile.gettempdir())
+            artifacts_dir = (temp_base / "artifacts").resolve()
+        else:
+            # Linux/Mac: use /tmp/artifacts
+            default_path = Path("/tmp/artifacts")
+            # Ensure /tmp exists
+            Path("/tmp").mkdir(exist_ok=True)
+            artifacts_dir = default_path.resolve()
     
     # Ensure directory exists
     artifacts_dir.mkdir(parents=True, exist_ok=True)

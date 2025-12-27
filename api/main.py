@@ -237,19 +237,27 @@ from api.paths import ARTIFACTS_DIR, DEBUG_SHOTS_DIR
 # Define route handler for artifacts BEFORE mount (so it takes precedence over StaticFiles)
 @app.get("/api/artifacts/{filename:path}")
 async def serve_artifact(filename: str):
-    """Serve artifact files directly (works better than StaticFiles mount in Railway)."""
-    from fastapi.responses import FileResponse
+    """
+    Serve artifact files directly (works better than StaticFiles mount in Railway).
+    
+    Returns:
+        - FileResponse with Cache-Control headers if file exists
+        - 404 JSON with clear error detail if not found
+    """
+    from fastapi.responses import FileResponse, JSONResponse
     from fastapi import HTTPException
+    from api.core.errors import error_payload
     import logging
     import os
     
     logger = logging.getLogger("artifacts")
     
     # Ensure artifacts directory exists
-    ARTIFACTS_DIR.mkdir(parents=True, exist_ok=True)
+    from api.services.artifacts import ensure_artifacts_dir
+    artifacts_dir = ensure_artifacts_dir()
     
     # Resolve to absolute path to ensure consistency
-    artifacts_dir_abs = ARTIFACTS_DIR.resolve()
+    artifacts_dir_abs = artifacts_dir.resolve()
     file_path = artifacts_dir_abs / filename
     
     # Log for debugging with full path information
@@ -278,44 +286,74 @@ async def serve_artifact(filename: str):
         except Exception as e:
             logger.error(f"Error listing artifacts: {e}", exc_info=True)
         
-        # Provide helpful error message
-        error_detail = {
-            "error": "Artifact not found",
-            "filename": filename,
-            "resolved_path": str(file_path),
-            "artifacts_dir": str(artifacts_dir_abs),
-            "artifacts_dir_exists": artifacts_dir_abs.exists(),
-            "hint": "File may not have been saved yet, or Railway's ephemeral filesystem may have cleared it."
-        }
-        raise HTTPException(status_code=404, detail=error_detail)
+        # Return 404 JSON with consistent error format
+        return JSONResponse(
+            status_code=404,
+            content=error_payload(
+                message=f"Artifact not found: {filename}",
+                stage="artifact_not_found",
+                hint="File may not have been saved yet, or Railway's ephemeral filesystem may have cleared it."
+            )
+        )
     
     # Security: Ensure file is within ARTIFACTS_DIR (prevent directory traversal)
     try:
         file_path.resolve().relative_to(artifacts_dir_abs)
     except ValueError:
         logger.error(f"Directory traversal attempt detected: {filename}")
-        raise HTTPException(status_code=403, detail="Access denied")
+        return JSONResponse(
+            status_code=403,
+            content=error_payload(
+                message="Access denied",
+                stage="security",
+                hint="Invalid file path"
+            )
+        )
     
     # Check file is readable
     try:
         file_size = file_path.stat().st_size
         if file_size == 0:
             logger.warning(f"Artifact file is empty: {filename}")
-            raise HTTPException(status_code=404, detail="Artifact file is empty")
+            return JSONResponse(
+                status_code=404,
+                content=error_payload(
+                    message=f"Artifact file is empty: {filename}",
+                    stage="artifact_invalid",
+                    hint="File exists but has no content"
+                )
+            )
     except OSError as e:
         logger.error(f"Cannot access artifact file: {filename}, error: {e}")
-        raise HTTPException(status_code=404, detail=f"Cannot access artifact file: {str(e)}")
+        return JSONResponse(
+            status_code=404,
+            content=error_payload(
+                message=f"Cannot access artifact file: {str(e)}",
+                stage="artifact_access_error",
+                hint="File may be locked or inaccessible"
+            )
+        )
     
     # Determine media type based on extension
     media_type = "image/png" if filename.lower().endswith(".png") else "application/octet-stream"
     
     logger.info(f"Serving artifact: {filename}, size: {file_size} bytes")
     
-    return FileResponse(
+    # Create response with Cache-Control header for immutable filenames
+    response = FileResponse(
         path=str(file_path),
         media_type=media_type,
         filename=filename
     )
+    
+    # Add Cache-Control header for immutable filenames (filenames with epoch are immutable)
+    if "_" in filename and filename.split("_")[-1].replace(".png", "").isdigit():
+        response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+    else:
+        # For other files, shorter cache
+        response.headers["Cache-Control"] = "public, max-age=3600"
+    
+    return response
 
 # Note: We use route handler instead of mount for /api/artifacts to ensure it works in Railway
 # Mount debug_shots directory (static files work fine for this)
@@ -326,13 +364,20 @@ app.mount("/api/debug_shots", StaticFiles(directory=str(DEBUG_SHOTS_DIR)), name=
 async def startup_event():
     """Log environment configuration on startup - heavy resources load lazily on first use."""
     import logging
+    from api.services.artifacts import ensure_artifacts_dir
+    
     logger = logging.getLogger("brain")
+    
+    # Ensure artifacts directory exists on startup
+    artifacts_dir = ensure_artifacts_dir()
+    logger.info(f"Artifacts directory ensured: {artifacts_dir}")
     
     # System prompt will be loaded lazily by chat functions when needed
     # This prevents blocking healthchecks during startup
     print("=" * 60)
     print("NIMA AI BRAIN API - Starting...")
     print("=" * 60)
+    print(f"Artifacts directory: {artifacts_dir}")
     print("System Prompt: Will load on first use (lazy loading)")
     
     # Safely check QUALITY_ENGINE_ENABLED (may not be defined yet)

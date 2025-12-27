@@ -13,7 +13,8 @@ from typing import Optional, Dict, Any
 from fastapi import APIRouter, HTTPException, Request
 from api.services.intake.unified_intake import build_page_map
 from api.services.decision.report_from_map import report_from_page_map
-from api.utils.english_only import enforce_english_only
+from api.utils.english_only import enforce_english_only, safe_en, FALLBACK_TEXTS
+from api.utils.output_sanitize import deep_fix_strings, enforce_english_only as sanitize_english_only
 
 logger = logging.getLogger(__name__)
 
@@ -257,10 +258,26 @@ async def analyze_human(request: Request) -> Dict[str, Any]:
         summary["issues_count"] = issues_count
         summary["quick_wins_count"] = quick_wins_count
         
-        # Extract screenshots (only for URL mode)
-        screenshots = None
-        if mode == "url" and "screenshots" in report:
-            screenshots = report.get("screenshots")
+        # Extract screenshots (ensure always an object, never null)
+        screenshots = report.get("screenshots")
+        if screenshots is None or not isinstance(screenshots, dict):
+            # For image/text mode, return empty screenshots object
+            screenshots = {
+                "desktop": {
+                    "above_the_fold_data_url": None,
+                    "full_page_data_url": None,
+                    "viewport": {"width": 1365, "height": 768},
+                    "above_the_fold": None,
+                    "full_page": None,
+                },
+                "mobile": {
+                    "above_the_fold_data_url": None,
+                    "full_page_data_url": None,
+                    "viewport": {"width": 390, "height": 844},
+                    "above_the_fold": None,
+                    "full_page": None,
+                }
+            }
         
         # Build response with all required fields
         response = {
@@ -278,29 +295,198 @@ async def analyze_human(request: Request) -> Dict[str, Any]:
             "debug": report.get("debug", {})
         }
         
-        # --- انتقال issues و quick_wins از debug به خروجی اصلی ---
-        debug = response.get("debug") or {}
-        after_heuristics = debug.get("after_heuristics") or {}
+        # Note: issues and quick_wins are already extracted from report above
+        # We don't need to override them from debug.after_heuristics as they may contain Persian
+        # The report_from_page_map already provides sanitized issues and quick_wins
         
-        issues = after_heuristics.get("issues", []) or []
-        quick_wins = after_heuristics.get("quick_wins", []) or []
+        # 🔴 جلوگیری کامل از خروج متن فارسی (حتی اگر اشتباهی تولید شد)
+        # First, replace any placeholder strings with safe fallbacks
+        issues = response.get("issues", [])
+        if isinstance(issues, list):
+            for issue in issues:
+                if isinstance(issue, dict):
+                    # Replace placeholder in problem field
+                    if "problem" in issue:
+                        issue["problem"] = safe_en(
+                            issue.get("problem", ""),
+                            FALLBACK_TEXTS["problem"]
+                        )
+                    # Replace placeholder in why_it_hurts field
+                    if "why_it_hurts" in issue:
+                        issue["why_it_hurts"] = safe_en(
+                            issue.get("why_it_hurts", ""),
+                            FALLBACK_TEXTS["why_it_hurts"]
+                        )
+                    # Replace placeholder in fix_steps array
+                    if "fix_steps" in issue:
+                        fix_steps = issue.get("fix_steps", [])
+                        if isinstance(fix_steps, list):
+                            fallback_steps = FALLBACK_TEXTS["fix_steps"]
+                            for i, step in enumerate(fix_steps):
+                                if isinstance(step, str):
+                                    fix_steps[i] = safe_en(
+                                        step,
+                                        fallback_steps[i] if i < len(fallback_steps) else fallback_steps[0]
+                                    )
+                            issue["fix_steps"] = fix_steps
+                    # Replace placeholder in evidence[].value
+                    if "evidence" in issue:
+                        evidence = issue.get("evidence", [])
+                        if isinstance(evidence, list):
+                            for ev in evidence:
+                                if isinstance(ev, dict) and "value" in ev:
+                                    ev["value"] = safe_en(
+                                        ev.get("value", ""),
+                                        FALLBACK_TEXTS["evidence_value"]
+                                    )
+                            issue["evidence"] = evidence
         
-        # اضافه شدن به خروجی اصلی
+        quick_wins = response.get("quick_wins", [])
+        if isinstance(quick_wins, list):
+            for qw in quick_wins:
+                if isinstance(qw, dict):
+                    # Replace placeholder in action field
+                    if "action" in qw:
+                        qw["action"] = safe_en(
+                            qw.get("action", ""),
+                            FALLBACK_TEXTS["quick_win_action"]
+                        )
+                    # Replace placeholder in reason field
+                    if "reason" in qw:
+                        qw["reason"] = safe_en(
+                            qw.get("reason", ""),
+                            FALLBACK_TEXTS["quick_win_reason"]
+                        )
+        
+        # Update response with sanitized issues and quick_wins
         response["issues"] = issues
         response["quick_wins"] = quick_wins
         
-        # شمارنده‌ها
-        response["issues_count"] = len(issues)
-        response["quick_wins_count"] = len(quick_wins)
+        # Rewrite non-English content instead of blanking it
+        debug_dict = response.get("debug", {})
+        if not isinstance(debug_dict, dict):
+            debug_dict = {}
         
-        # هماهنگ‌سازی summary
-        summary = response.get("summary") or {}
-        summary["issues_count"] = response["issues_count"]
-        summary["quick_wins_count"] = response["quick_wins_count"]
-        response["summary"] = summary
+        # Sanitize debug to remove any Persian content (fix mojibake and remove Persian)
+        debug_dict = deep_fix_strings(debug_dict)
         
-        # 🔴 جلوگیری کامل از خروج متن فارسی (حتی اگر اشتباهی تولید شد)
-        response = enforce_english_only(response)
+        # Recursively scrub Persian from debug (especially after_heuristics.quick_wins)
+        def scrub_persian_from_debug(obj: Any) -> Any:
+            """Recursively remove Persian content from debug structure."""
+            if isinstance(obj, str):
+                # Check for Persian characters
+                has_persian = any("\u0600" <= ch <= "\u06FF" or "\u0750" <= ch <= "\u077F" or "\u08A0" <= ch <= "\u08FF" for ch in obj)
+                if has_persian:
+                    # Replace with safe English
+                    if "quick_win" in str(type(obj).__name__).lower() or "action" in str(type(obj).__name__).lower():
+                        return "Quick improvement opportunity identified."
+                    elif "issue" in str(type(obj).__name__).lower():
+                        return "Conversion barrier detected."
+                    else:
+                        return "Analysis completed."
+                return obj
+            elif isinstance(obj, list):
+                return [scrub_persian_from_debug(x) for x in obj]
+            elif isinstance(obj, dict):
+                return {k: scrub_persian_from_debug(v) for k, v in obj.items()}
+            else:
+                return obj
+        
+        debug_dict = scrub_persian_from_debug(debug_dict)
+        
+        response, stats = enforce_english_only(response, mode=mode, debug=debug_dict, page_map=page_map, summary=summary)
+        
+        # Ensure screenshots is never null after sanitization
+        if response.get("screenshots") is None or not isinstance(response.get("screenshots"), dict):
+            response["screenshots"] = {
+                "desktop": {
+                    "above_the_fold_data_url": None,
+                    "full_page_data_url": None,
+                    "viewport": {"width": 1365, "height": 768},
+                    "above_the_fold": None,
+                    "full_page": None,
+                },
+                "mobile": {
+                    "above_the_fold_data_url": None,
+                    "full_page_data_url": None,
+                    "viewport": {"width": 390, "height": 844},
+                    "above_the_fold": None,
+                    "full_page": None,
+                }
+            }
+        
+        # Update debug in response
+        response["debug"] = debug_dict
+        
+        # Prepend "Preliminary insight:" to text fields if low_confidence
+        if stats.get("low_confidence", False):
+            # Update issues (prepend prefix to problem, why_it_hurts, and description fields)
+            issues = response.get("issues", [])
+            if isinstance(issues, list):
+                for i, issue in enumerate(issues):
+                    if isinstance(issue, dict):
+                        # Handle problem field
+                        problem = issue.get("problem", "")
+                        if problem and not problem.startswith("Preliminary insight:"):
+                            issue["problem"] = f"Preliminary insight: {problem}"
+                        
+                        # Handle why_it_hurts field
+                        why_it_hurts = issue.get("why_it_hurts", "")
+                        if why_it_hurts and not why_it_hurts.startswith("Preliminary insight:"):
+                            issue["why_it_hurts"] = f"Preliminary insight: {why_it_hurts}"
+                        
+                        # Handle description field (legacy)
+                        desc = issue.get("description", "")
+                        if desc and not desc.startswith("Preliminary insight:"):
+                            issue["description"] = f"Preliminary insight: {desc}"
+                    elif isinstance(issue, str):
+                        # Handle string issues - convert to dict format
+                        if not issue.startswith("Preliminary insight:"):
+                            issues[i] = {
+                                "type": "general",
+                                "problem": f"Preliminary insight: {issue}",
+                                "why_it_hurts": "Preliminary insight: This issue may impact conversion rates.",
+                                "severity": "medium"
+                            }
+                response["issues"] = issues
+            
+            # Update quick_wins (convert description to action/reason if needed, and prepend prefix)
+            quick_wins = response.get("quick_wins", [])
+            if isinstance(quick_wins, list):
+                for i, qw in enumerate(quick_wins):
+                    if isinstance(qw, dict):
+                        # Convert description to action/reason if needed
+                        if "description" in qw and "action" not in qw:
+                            desc = qw.get("description", "")
+                            qw["action"] = desc
+                            qw["reason"] = "This improvement addresses a key conversion barrier."
+                            del qw["description"]
+                        
+                        # Prepend prefix to action if needed
+                        action = qw.get("action", "")
+                        if action and not action.startswith("Preliminary insight:"):
+                            qw["action"] = f"Preliminary insight: {action}"
+                        
+                        # Prepend prefix to reason if needed
+                        reason = qw.get("reason", "")
+                        if reason and not reason.startswith("Preliminary insight:"):
+                            qw["reason"] = f"Preliminary insight: {reason}"
+                    elif isinstance(qw, str):
+                        # Handle string quick_wins - convert to dict format
+                        if not qw.startswith("Preliminary insight:"):
+                            quick_wins[i] = {
+                                "action": f"Preliminary insight: {qw}",
+                                "reason": "Preliminary insight: This improvement addresses a key conversion barrier."
+                            }
+                response["quick_wins"] = quick_wins
+            
+            # Update human_report if it exists (only if not already prefixed)
+            human_report = response.get("human_report", "")
+            if human_report and isinstance(human_report, str) and not human_report.startswith("Preliminary insight:"):
+                response["human_report"] = f"Preliminary insight: {human_report}"
+        
+        # Ensure debug is updated
+        response["debug"] = debug_dict
         
         return response
         

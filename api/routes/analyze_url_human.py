@@ -23,6 +23,7 @@ from api.services.page_capture import capture_page_artifacts
 from api.services.page_extract import extract_page_map
 from api.services.brain_rules import run_heuristics
 from api.services.human_report import render_human_report
+from api.utils.output_sanitize import normalize_response_shape, enforce_english_only, ensure_capture_attached
 
 # Optional import for memory logging (may not be available in all environments)
 try:
@@ -85,6 +86,131 @@ def public_artifact_url(request: FastAPIRequest, abs_path: str | None) -> str | 
     return _public_file_url(request, abs_path, "/api/artifacts")
 
 
+def _get_base_url(request: FastAPIRequest) -> str:
+    """
+    Get base URL for making relative URLs absolute.
+    
+    Uses PUBLIC_BASE_URL env var if set, otherwise falls back to request base URL.
+    """
+    from api.core.config import get_public_base_url
+    public_base_url = get_public_base_url()
+    
+    if public_base_url:
+        return public_base_url.rstrip("/")
+    else:
+        # Fallback to request-based URL
+        proto = request.headers.get("x-forwarded-proto", "http")
+        host = request.headers.get("host")
+        if host:
+            return f"{proto}://{host}".rstrip("/")
+        else:
+            return str(request.base_url).rstrip("/")
+
+
+def _make_url_absolute(url: str | None, base_url: str) -> str | None:
+    """
+    Make a URL absolute if it's relative (starts with "api/" or "/api/").
+    
+    Args:
+        url: URL to make absolute (can be None)
+        base_url: Base URL to prefix with
+        
+    Returns:
+        Absolute URL or None if input was None
+    """
+    if not url or not isinstance(url, str):
+        return url
+    
+    # If already absolute (starts with http:// or https://), return as-is
+    if url.startswith(("http://", "https://")):
+        return url
+    
+    # If relative (starts with "api/" or "/api/"), make absolute
+    if url.startswith("api/") or url.startswith("/api/"):
+        # Remove leading slash if present
+        path = url.lstrip("/")
+        return f"{base_url}/{path}"
+    
+    # Otherwise return as-is
+    return url
+
+
+def _normalize_screenshot_keys(result: Dict[str, Any], request: FastAPIRequest) -> Dict[str, Any]:
+    """
+    Normalize screenshot keys in capture.screenshots for frontend compatibility.
+    
+    - Adds `above_the_fold` = `desktop` if missing
+    - Adds `mobile_above_the_fold` = `mobile` if missing
+    - Makes URLs absolute if they start with "api/" or "/api/"
+    - Adds debug info about screenshot keys
+    
+    Args:
+        result: Response dictionary
+        request: FastAPI Request object for determining base URL
+        
+    Returns:
+        Result dictionary with normalized screenshot keys
+    """
+    # Ensure capture exists
+    if "capture" not in result or not isinstance(result.get("capture"), dict):
+        return result
+    
+    capture = result["capture"]
+    
+    # Ensure screenshots exists in capture
+    if "screenshots" not in capture or not isinstance(capture.get("screenshots"), dict):
+        return result
+    
+    screenshots = capture["screenshots"]
+    
+    # Get base URL for making relative URLs absolute
+    base_url = _get_base_url(request)
+    
+    # Normalize keys: add above_the_fold and mobile_above_the_fold if missing
+    if "desktop" in screenshots and "above_the_fold" not in screenshots:
+        screenshots["above_the_fold"] = screenshots["desktop"]
+    
+    if "mobile" in screenshots and "mobile_above_the_fold" not in screenshots:
+        screenshots["mobile_above_the_fold"] = screenshots["mobile"]
+    
+    # Make URLs absolute in all screenshot objects
+    def _normalize_screenshot_object(obj: Any) -> Any:
+        """Recursively normalize screenshot object URLs."""
+        if isinstance(obj, dict):
+            normalized = {}
+            for key, value in obj.items():
+                # Check if this is a URL field (contains "url" or "data_url")
+                if ("url" in key.lower() or "data_url" in key.lower()) and isinstance(value, str):
+                    normalized[key] = _make_url_absolute(value, base_url)
+                else:
+                    # Recursively process nested objects
+                    normalized[key] = _normalize_screenshot_object(value)
+            return normalized
+        elif isinstance(obj, list):
+            return [_normalize_screenshot_object(item) for item in obj]
+        else:
+            return obj
+    
+    # Normalize all screenshot objects
+    screenshots = _normalize_screenshot_object(screenshots)
+    capture["screenshots"] = screenshots
+    
+    # Add debug info
+    debug = result.get("debug", {})
+    if not isinstance(debug, dict):
+        debug = {}
+    
+    debug["screenshots_keys"] = list(screenshots.keys())
+    debug["screenshots_values_present"] = {
+        k: bool(screenshots.get(k)) for k in screenshots.keys()
+    }
+    
+    result["debug"] = debug
+    result["capture"] = capture
+    
+    return result
+
+
 class AnalyzeUrlHumanRequest(BaseModel):
     """Request model for human URL analysis."""
     url: str
@@ -129,58 +255,29 @@ async def test_capture_only(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
     
     try:
         print(f"[test_capture] Starting capture for: {payload.url}")
-        capture = await capture_page_artifacts(str(payload.url))
         
-        # Get screenshot data URLs from capture (new structure with desktop and mobile)
-        screenshots_raw = capture.get("screenshots", {})
-        desktop_screenshots = screenshots_raw.get("desktop", {})
-        mobile_screenshots = screenshots_raw.get("mobile", {})
+        # Get base URL for artifact URLs
+        base_url = _get_base_url(request)
         
-        # Extract data URLs (new approach - no file system dependency)
-        desktop_atf_data_url = desktop_screenshots.get("above_the_fold_data_url")
-        desktop_full_data_url = desktop_screenshots.get("full_page_data_url")
-        mobile_atf_data_url = mobile_screenshots.get("above_the_fold_data_url")
-        mobile_full_data_url = mobile_screenshots.get("full_page_data_url")
+        capture = await capture_page_artifacts(str(payload.url), base_url=base_url)
         
-        # Verify data URLs exist
-        if not desktop_atf_data_url or not desktop_atf_data_url.startswith("data:image/png;base64,"):
-            logger.error(f"[test_capture] Desktop ATF data URL missing or invalid")
-        if not desktop_full_data_url or not desktop_full_data_url.startswith("data:image/png;base64,"):
-            logger.error(f"[test_capture] Desktop Full data URL missing or invalid")
-        if not mobile_atf_data_url or not mobile_atf_data_url.startswith("data:image/png;base64,"):
-            logger.error(f"[test_capture] Mobile ATF data URL missing or invalid")
-        if not mobile_full_data_url or not mobile_full_data_url.startswith("data:image/png;base64,"):
-            logger.error(f"[test_capture] Mobile Full data URL missing or invalid")
+        # Extract artifacts from capture (new structure)
+        artifacts = capture.get("artifacts", {})
         
-        # Build screenshot response with data URLs (no file system needed)
-        screenshots_response = {
-            "desktop": {
-                "above_the_fold_data_url": desktop_atf_data_url,
-                "full_page_data_url": desktop_full_data_url,
-                "viewport": desktop_screenshots.get("viewport", {"width": 1365, "height": 768}),
-                # Legacy fields (set to None - no longer used)
-                "above_the_fold": None,
-                "full_page": None,
-            },
-            "mobile": {
-                "above_the_fold_data_url": mobile_atf_data_url,
-                "full_page_data_url": mobile_full_data_url,
-                "viewport": mobile_screenshots.get("viewport", {"width": 390, "height": 844}),
-                # Legacy fields (set to None - no longer used)
-                "above_the_fold": None,
-                "full_page": None,
-            }
+        # Build capture response with new structure
+        capture_response = {
+            "status": capture.get("status", "ok"),
+            "timestamp": capture.get("timestamp_utc"),
+            "title": capture.get("dom", {}).get("title"),
+            "html_length": len(capture.get("dom", {}).get("html_excerpt", "")),
+            "artifacts": artifacts,  # New structure with url + data_uri
+            "screenshots": capture.get("screenshots", {})  # Legacy format
         }
         
         return {
             "analysisStatus": "ok",
             "url": payload.url,
-            "capture": {
-                "timestamp": capture.get("timestamp_utc"),
-                "title": capture.get("dom", {}).get("title"),
-                "html_length": len(capture.get("dom", {}).get("html_excerpt", "")),
-                "screenshots": screenshots_response
-            }
+            "capture": capture_response
         }
     except Exception as e:
         import traceback
@@ -191,6 +288,26 @@ async def test_capture_only(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         error_stage = "artifact_missing" if "ARTIFACT_MISSING" in error_detail or "ARTIFACT_INVALID" in error_detail else "capture_failed"
         
         # Return error response with analysisStatus instead of raising HTTPException
+        # Include error artifacts structure (never null)
+        error_artifacts = {
+            "above_the_fold": {
+                "desktop": {
+                    "filename": None,
+                    "url": None,
+                    "data_uri": None,
+                    "width": 1365,
+                    "height": 768
+                },
+                "mobile": {
+                    "filename": None,
+                    "url": None,
+                    "data_uri": None,
+                    "width": 390,
+                    "height": 844
+                }
+            }
+        }
+        
         return {
             "analysisStatus": "error",
             "url": payload.url,
@@ -198,10 +315,15 @@ async def test_capture_only(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
                 "message": error_detail,
                 "stage": error_stage
             },
-            "capture": None
+            "capture": {
+                "status": "error",
+                "error": error_detail,
+                "artifacts": error_artifacts,
+                "screenshots": {}
+            }
         }
 
-@router.post("/api/analyze/url-human")
+@router.post("/api/analyze/url-human", response_model=None)
 async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIRequest) -> Dict[str, Any]:
     """
     Analyze a URL and generate a human-readable report.
@@ -341,6 +463,29 @@ async def analyze_url_human(payload: AnalyzeUrlHumanRequest, request: FastAPIReq
         except Exception as e:
             # Memory failures must never break the main analysis path
             logger.warning(f"[analyze_url_human] Failed to log analysis memory: {e}")
+        
+        # ✅ Ensure capture and screenshots are always attached (never null)
+        response_data = await ensure_capture_attached(
+            url=payload.url,
+            goal=payload.goal or "other",
+            locale=payload.locale or "en",
+            result=response_data,
+            request=request
+        )
+        
+        # ✅ Normalize screenshot keys for frontend compatibility
+        response_data = _normalize_screenshot_keys(response_data, request)
+        
+        # ✅ normalize response keys + fill summary.url
+        response_data = normalize_response_shape(
+            response_data,
+            url=payload.url,
+            locale=payload.locale or "en",
+            goal=payload.goal or "other"
+        )
+        
+        # ✅ enforce English + repair mojibake (when locale=en)
+        response_data = enforce_english_only(response_data)
         
         return response_data
         

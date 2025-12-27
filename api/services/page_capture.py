@@ -20,6 +20,7 @@ logger = logging.getLogger(__name__)
 
 # Use centralized paths from api.paths
 from api.paths import ARTIFACTS_DIR
+from api.services.artifacts import save_artifact_bytes, bytes_to_data_uri, artifact_public_url
 
 
 def png_bytes_to_data_url(png_bytes: bytes) -> str:
@@ -258,18 +259,32 @@ def _capture_viewport_sync(
     return html, title, readable, atf_bytes, full_bytes
 
 
-async def capture_page_artifacts(url: str) -> Dict[str, Any]:
+async def capture_page_artifacts(url: str, base_url: str | None = None) -> Dict[str, Any]:
     """
     Capture page artifacts using Playwright:
-    - Screenshots (Desktop ATF + Full, Mobile ATF + Full) as Base64 data URLs
+    - Screenshots (Desktop ATF + Full, Mobile ATF + Full) saved to disk and returned as URLs + data URIs
     - HTML content
     - Readable text
     
     Args:
         url: URL to capture
+        base_url: Base URL for generating public artifact URLs (optional)
         
     Returns:
-        Dictionary with screenshot data URLs, DOM content, and metadata
+        Dictionary with screenshot artifacts (url + data_uri), DOM content, and metadata
+        Structure:
+        {
+            "status": "ok" | "error",
+            "timestamp_utc": "...",
+            "artifacts": {
+                "above_the_fold": {
+                    "desktop": { "filename", "url", "data_uri", "width", "height" },
+                    "mobile": { "filename", "url", "data_uri", "width", "height" }
+                }
+            },
+            "screenshots": { ... },  # Legacy format for backward compat
+            "dom": { ... }
+        }
     """
     # Desktop viewport
     desktop_viewport = {"width": 1365, "height": 768}
@@ -284,6 +299,11 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
     desktop_full_bytes = b""
     mobile_atf_bytes = b""
     mobile_full_bytes = b""
+    
+    # Generate unique filenames using epoch timestamp
+    epoch = int(time.time())
+    
+    logger.info(f"Starting capture for {url}")
     
     try:
         # Run Playwright in a thread pool to avoid event loop conflicts
@@ -358,14 +378,38 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
         if len(mobile_full_bytes) == 0:
             logger.warning("Mobile Full screenshot is empty")
         
-        # Convert PNG bytes to Base64 data URLs
-        desktop_atf_data_url = png_bytes_to_data_url(desktop_atf_bytes)
-        desktop_full_data_url = png_bytes_to_data_url(desktop_full_bytes)
-        mobile_atf_data_url = png_bytes_to_data_url(mobile_atf_bytes)
-        mobile_full_data_url = png_bytes_to_data_url(mobile_full_bytes)
+        # Save artifacts and generate URLs
+        desktop_atf_filename = f"atf_desktop_{epoch}.png"
+        mobile_atf_filename = f"atf_mobile_{epoch}.png"
+        
+        desktop_atf_url = None
+        mobile_atf_url = None
+        
+        try:
+            if len(desktop_atf_bytes) > 0:
+                desktop_atf_url = save_artifact_bytes(desktop_atf_filename, desktop_atf_bytes, base_url)
+                logger.info(f"Saved desktop ATF: {desktop_atf_filename}, url: {desktop_atf_url}, size: {len(desktop_atf_bytes)} bytes")
+        except Exception as e:
+            logger.error(f"Failed to save desktop ATF artifact: {type(e).__name__}: {e}", exc_info=True)
+            # Continue without URL, but keep data_uri
+        
+        try:
+            if len(mobile_atf_bytes) > 0:
+                mobile_atf_url = save_artifact_bytes(mobile_atf_filename, mobile_atf_bytes, base_url)
+                logger.info(f"Saved mobile ATF: {mobile_atf_filename}, url: {mobile_atf_url}, size: {len(mobile_atf_bytes)} bytes")
+        except Exception as e:
+            logger.error(f"Failed to save mobile ATF artifact: {type(e).__name__}: {e}", exc_info=True)
+            # Continue without URL, but keep data_uri
+        
+        # Convert PNG bytes to Base64 data URLs (always provide fallback)
+        desktop_atf_data_uri = bytes_to_data_uri(desktop_atf_bytes) if len(desktop_atf_bytes) > 0 else None
+        desktop_full_data_uri = bytes_to_data_uri(desktop_full_bytes) if len(desktop_full_bytes) > 0 else None
+        mobile_atf_data_uri = bytes_to_data_uri(mobile_atf_bytes) if len(mobile_atf_bytes) > 0 else None
+        mobile_full_data_uri = bytes_to_data_uri(mobile_full_bytes) if len(mobile_full_bytes) > 0 else None
         
     except Exception as e:
         error_str = str(e)
+        error_type = type(e).__name__
         # Check if it's a network resolution error (expected for invalid URLs)
         if "ERR_NAME_NOT_RESOLVED" in error_str or "net::" in error_str:
             # Log as warning (not error) for expected network errors, without full traceback
@@ -373,10 +417,54 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
             error_msg = f"Playwright error while capturing {url}: {error_str}"
         else:
             # Log full traceback only for unexpected errors
-            logger.exception(f"Playwright error while capturing {url}: {type(e).__name__}: {error_str}")
-            error_msg = f"Playwright error while capturing {url}: {type(e).__name__}: {error_str}"
-        # Re-raise with more context
-        raise Exception(error_msg) from e
+            logger.exception(f"Playwright error while capturing {url}: {error_type}: {error_str}")
+            error_msg = f"Playwright error while capturing {url}: {error_type}: {error_str}"
+        
+        # Return error structure instead of raising (don't crash the request)
+        return {
+            "status": "error",
+            "error": error_msg,
+            "timestamp_utc": _utc_now(),
+            "artifacts": {
+                "above_the_fold": {
+                    "desktop": {
+                        "filename": None,
+                        "url": None,
+                        "data_uri": None,
+                        "width": desktop_viewport["width"],
+                        "height": desktop_viewport["height"]
+                    },
+                    "mobile": {
+                        "filename": None,
+                        "url": None,
+                        "data_uri": None,
+                        "width": mobile_viewport["width"],
+                        "height": mobile_viewport["height"]
+                    }
+                }
+            },
+            "screenshots": {
+                "desktop": {
+                    "above_the_fold_data_url": None,
+                    "full_page_data_url": None,
+                    "viewport": desktop_viewport,
+                    "above_the_fold": None,
+                    "full_page": None,
+                },
+                "mobile": {
+                    "above_the_fold_data_url": None,
+                    "full_page_data_url": None,
+                    "viewport": mobile_viewport,
+                    "above_the_fold": None,
+                    "full_page": None,
+                }
+            },
+            "dom": {
+                "title": "",
+                "html_excerpt": "",
+                "readable_text_excerpt": ""
+            }
+        }
     
     # Keep excerpts to avoid huge payloads
     html_excerpt = html[:20000] if html else ""
@@ -390,26 +478,51 @@ async def capture_page_artifacts(url: str) -> Dict[str, Any]:
     except Exception:
         pass  # Keep original title if encoding fix fails
     
-    return {
-        "timestamp_utc": _utc_now(),
-        "screenshots": {
+    # Build new artifacts structure
+    artifacts = {
+        "above_the_fold": {
             "desktop": {
-                "above_the_fold_data_url": desktop_atf_data_url,
-                "full_page_data_url": desktop_full_data_url,
-                "viewport": desktop_viewport,
-                # Legacy fields (set to None for backward compat, but don't use)
-                "above_the_fold": None,
-                "full_page": None,
+                "filename": desktop_atf_filename if len(desktop_atf_bytes) > 0 else None,
+                "url": desktop_atf_url,
+                "data_uri": desktop_atf_data_uri,
+                "width": desktop_viewport["width"],
+                "height": desktop_viewport["height"]
             },
             "mobile": {
-                "above_the_fold_data_url": mobile_atf_data_url,
-                "full_page_data_url": mobile_full_data_url,
-                "viewport": mobile_viewport,
-                # Legacy fields (set to None for backward compat, but don't use)
-                "above_the_fold": None,
-                "full_page": None,
+                "filename": mobile_atf_filename if len(mobile_atf_bytes) > 0 else None,
+                "url": mobile_atf_url,
+                "data_uri": mobile_atf_data_uri,
+                "width": mobile_viewport["width"],
+                "height": mobile_viewport["height"]
             }
+        }
+    }
+    
+    # Build legacy screenshots structure for backward compatibility
+    screenshots = {
+        "desktop": {
+            "above_the_fold_data_url": desktop_atf_data_uri,
+            "full_page_data_url": desktop_full_data_uri,
+            "viewport": desktop_viewport,
+            "above_the_fold": None,
+            "full_page": None,
         },
+        "mobile": {
+            "above_the_fold_data_url": mobile_atf_data_uri,
+            "full_page_data_url": mobile_full_data_uri,
+            "viewport": mobile_viewport,
+            "above_the_fold": None,
+            "full_page": None,
+        }
+    }
+    
+    logger.info(f"Capture completed successfully for {url}")
+    
+    return {
+        "status": "ok",
+        "timestamp_utc": _utc_now(),
+        "artifacts": artifacts,
+        "screenshots": screenshots,  # Legacy format
         "dom": {
             "title": title,
             "html_excerpt": html_excerpt,
